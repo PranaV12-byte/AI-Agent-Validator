@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_USER: safebot
+      POSTGRES_PASSWORD: safebot_dev
+      POSTGRES_DB: safebot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safebot"]
+      interval: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+volumes:
+  pgdata:

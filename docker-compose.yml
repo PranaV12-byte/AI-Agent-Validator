@@ -1,0 +1,6 @@
+version: "3.9"
+
+# Production docker-compose — implemented in Phase 9 (Deployment)
+# Placeholder created in Phase 1 to satisfy directory structure requirements.
+
+services: {}

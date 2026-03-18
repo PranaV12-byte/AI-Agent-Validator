@@ -1,0 +1,87 @@
+# Environments / Secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+ENV/
+
+# OS / Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Testing and Code Coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+
+# Caches
+.ruff_cache/
+.mypy_cache/
+
+# Node / JS
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.eslintcache
+
+# Logs and temp output files
+*.log
+*.sqlite3
+migrate_out.txt
+
+# Temp/debugging
+tmp/
+temp/
+/backend/models/  # HuggingFace downloaded models
+/backend/logs/ 
+
+# Temporary Test / Output JSON files
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!components.json
+!manifest.json
+!.prettierrc.json
+!.eslintrc.json
+
+test-reports/

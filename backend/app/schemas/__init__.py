@@ -1,0 +1,1 @@
+# Safebot — schemas package

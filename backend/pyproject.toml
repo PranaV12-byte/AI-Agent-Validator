@@ -1,0 +1,47 @@
+[project]
+name = "safebot"
+version = "1.0.0"
+description = "AI Guardrails Middleware for SMBs"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "gunicorn>=23.0.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "sqlalchemy[asyncio]>=2.0.35",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "pgvector>=0.3.5",
+    "redis>=5.2.0",
+    "celery[redis]>=5.4.0",
+    "slowapi>=0.1.9",
+    "python-jose[cryptography]>=3.3.0",
+    "bcrypt>=4.0.0",
+    "python-multipart>=0.0.12",
+    "httpx>=0.27.0",
+    "structlog>=24.4.0",
+    "sentry-sdk[fastapi]>=2.16.0",
+    "prometheus-fastapi-instrumentator>=7.0.0",
+    # ML Dependencies
+    "transformers>=4.46.0",
+    "torch>=2.5.0",
+    "sentence-transformers>=3.3.0",
+    "spacy>=3.8.0",
+    # Algorand
+    "algokit-utils>=3.0.0",
+    "py-algorand-sdk>=2.6.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
+    "factory-boy>=3.3.0",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
