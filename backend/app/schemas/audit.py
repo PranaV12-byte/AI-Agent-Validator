@@ -1,6 +1,7 @@
 """Pydantic schemas for audit APIs."""
 
 from datetime import datetime
+from ipaddress import IPv4Address, IPv6Address
 from typing import Any
 from uuid import UUID
 
@@ -25,7 +26,7 @@ class AuditLogResponse(BaseModel):
     policy_version: int | None
     algorand_tx_id: str | None
     processing_ms: int | None
-    ip_address: str | None
+    ip_address: IPv4Address | IPv6Address | None
     user_agent: str | None
     created_at: datetime
 

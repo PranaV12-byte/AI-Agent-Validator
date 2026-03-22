@@ -1,6 +1,6 @@
 """Dashboard stats and safety-config endpoints."""
 
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
@@ -9,15 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_tenant
 from app.models.audit_log import AuditLog
-from app.models.policy import Policy
 from app.models.safety_config import SafetyConfig
 from app.models.tenant import Tenant
 from app.schemas.dashboard import (
     DashboardResponse,
-    DashboardStats,
     SafetyConfigResponse,
     SafetyConfigUpdate,
-    UsageTrend,
 )
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -28,85 +25,28 @@ async def get_dashboard_stats(
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> DashboardResponse:
-    """Return today's metrics and 30-day trend data for dashboard."""
-    today = date.today()
+    """Return last-7-days dashboard aggregates for authenticated tenant."""
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
 
-    today_query = select(
-        func.count(AuditLog.id).label("total"),
-        func.count(AuditLog.id).filter(AuditLog.action == "BLOCKED").label("blocked"),
-        func.count(AuditLog.id).filter(AuditLog.action == "ALLOWED").label("allowed"),
-        func.count(AuditLog.id).filter(AuditLog.action == "REDACTED").label("redacted"),
-        func.avg(AuditLog.processing_ms).label("avg_latency"),
-        func.count(AuditLog.algorand_tx_id).label("chain_verified"),
+    query = select(
+        func.count(AuditLog.id).label("total_requests"),
+        func.count(AuditLog.id)
+        .filter(AuditLog.action == "BLOCKED")
+        .label("blocked_requests"),
+        func.avg(AuditLog.processing_ms).label("avg_latency_ms"),
     ).where(
         AuditLog.tenant_id == tenant.id,
-        func.date(AuditLog.created_at) == today,
+        AuditLog.created_at >= seven_days_ago,
     )
 
-    result = await db.execute(today_query)
+    result = await db.execute(query)
     row = result.one()
-    total_today = row.total or 0
-    blocked_today = row.blocked or 0
 
-    policy_count = await db.execute(
-        select(func.count(Policy.id)).where(
-            Policy.tenant_id == tenant.id,
-            Policy.is_enabled.is_(True),
-        )
+    return DashboardResponse(
+        total_requests=int(row.total_requests or 0),
+        blocked_requests=int(row.blocked_requests or 0),
+        avg_latency_ms=round(float(row.avg_latency_ms or 0.0), 1),
     )
-    active_policies = policy_count.scalar() or 0
-
-    stats = DashboardStats(
-        total_requests_today=total_today,
-        blocked_today=blocked_today,
-        allowed_today=row.allowed or 0,
-        redacted_today=row.redacted or 0,
-        block_rate_percent=round(
-            (blocked_today / total_today * 100) if total_today > 0 else 0, 1
-        ),
-        avg_latency_ms=round(float(row.avg_latency or 0), 1),
-        active_policies=active_policies,
-        chain_verified_count=row.chain_verified or 0,
-    )
-
-    thirty_days_ago = today - timedelta(days=30)
-    trends_query = (
-        select(
-            func.date(AuditLog.created_at).label("log_date"),
-            func.count(AuditLog.id).label("total"),
-            func.count(AuditLog.id)
-            .filter(AuditLog.action == "BLOCKED")
-            .label("blocked"),
-            func.count(AuditLog.id)
-            .filter(AuditLog.action == "ALLOWED")
-            .label("allowed"),
-            func.count(AuditLog.id)
-            .filter(AuditLog.action == "REDACTED")
-            .label("redacted"),
-            func.avg(AuditLog.processing_ms).label("avg_lat"),
-        )
-        .where(
-            AuditLog.tenant_id == tenant.id,
-            func.date(AuditLog.created_at) >= thirty_days_ago,
-        )
-        .group_by(func.date(AuditLog.created_at))
-        .order_by(func.date(AuditLog.created_at))
-    )
-
-    trends_result = await db.execute(trends_query)
-    trends = [
-        UsageTrend(
-            date=row_item.log_date,
-            total_requests=row_item.total,
-            blocked_count=row_item.blocked,
-            allowed_count=row_item.allowed,
-            redacted_count=row_item.redacted,
-            avg_latency_ms=round(float(row_item.avg_lat or 0), 1),
-        )
-        for row_item in trends_result.all()
-    ]
-
-    return DashboardResponse(stats=stats, trends=trends)
 
 
 @router.get("/safety-config", response_model=SafetyConfigResponse)

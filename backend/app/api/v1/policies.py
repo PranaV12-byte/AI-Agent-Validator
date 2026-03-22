@@ -9,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_tenant
 from app.models.policy import Policy
+from app.models.safety_config import SafetyConfig
 from app.models.tenant import Tenant
 from app.schemas.policies import (
+    PolicyConfigResponse,
+    PolicyConfigUpdate,
     PolicyCreate,
     PolicyListResponse,
     PolicyResponse,
@@ -20,6 +23,66 @@ from app.services.guardrails.policy_engine import policy_engine
 from app.worker import register_policy_on_chain_task
 
 router = APIRouter(prefix="/policies", tags=["Policies"])
+
+
+@router.get("/config", response_model=PolicyConfigResponse)
+async def get_policy_config(
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> PolicyConfigResponse:
+    """Get tenant policy behavior configuration."""
+    result = await db.execute(
+        select(SafetyConfig).where(SafetyConfig.tenant_id == tenant.id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Safety config not found")
+
+    return PolicyConfigResponse(
+        tenant_id=tenant.id,
+        active_policy_version=tenant.active_policy_version,
+        injection_protection=config.injection_protection,
+        injection_sensitivity=config.injection_sensitivity,
+        pii_redaction=config.pii_redaction,
+        policy_enforcement=config.policy_enforcement,
+        fail_mode=config.fail_mode,
+        fallback_message=config.fallback_message,
+    )
+
+
+@router.put("/config", response_model=PolicyConfigResponse)
+async def update_policy_config(
+    body: PolicyConfigUpdate,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> PolicyConfigResponse:
+    """Update tenant policy behavior and bump active policy version."""
+    result = await db.execute(
+        select(SafetyConfig).where(SafetyConfig.tenant_id == tenant.id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Safety config not found")
+
+    update_data = body.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(config, key, value)
+
+    tenant.active_policy_version += 1
+    await db.commit()
+    await db.refresh(config)
+    await db.refresh(tenant)
+
+    return PolicyConfigResponse(
+        tenant_id=tenant.id,
+        active_policy_version=tenant.active_policy_version,
+        injection_protection=config.injection_protection,
+        injection_sensitivity=config.injection_sensitivity,
+        pii_redaction=config.pii_redaction,
+        policy_enforcement=config.policy_enforcement,
+        fail_mode=config.fail_mode,
+        fallback_message=config.fallback_message,
+    )
 
 
 @router.get("/", response_model=PolicyListResponse)

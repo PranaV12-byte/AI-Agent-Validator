@@ -1,5 +1,7 @@
 """Pydantic schemas for authentication APIs."""
 
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
@@ -23,4 +25,21 @@ class AuthResponse(BaseModel):
 
     access_token: str
     token_type: str = "bearer"
+    api_key: str | None = None
+
+
+class TenantProfileResponse(BaseModel):
+    """Authenticated tenant profile payload."""
+
+    id: UUID
+    company_name: str
+    email: str
+    api_key_prefix: str
+    active_policy_version: int
+
+
+class RegenerateApiKeyResponse(BaseModel):
+    """One-time API key rotation response."""
+
     api_key: str
+    api_key_prefix: str

@@ -1,10 +1,42 @@
 """Pydantic schemas for policy APIs."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+PolicyRuleType = (
+    "semantic",
+    "keyword",
+    "regex_match",
+    "llm_eval",
+    "pii_redaction",
+    "prompt_injection",
+)
+
+
+def _validate_rule_parameters(
+    rule_type: str, parameters: dict[str, Any] | None
+) -> None:
+    params = parameters or {}
+
+    if rule_type == "regex_match":
+        pattern = params.get("pattern")
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError(
+                "regex_match requires parameters.pattern as non-empty string"
+            )
+
+    if rule_type == "llm_eval":
+        rubric = params.get("rubric")
+        if not isinstance(rubric, str) or not rubric.strip():
+            raise ValueError("llm_eval requires parameters.rubric as non-empty string")
+
+    if rule_type == "keyword":
+        keyword = params.get("keyword")
+        if not isinstance(keyword, str) or not keyword.strip():
+            raise ValueError("keyword requires parameters.keyword as non-empty string")
 
 
 class PolicyCreate(BaseModel):
@@ -16,6 +48,13 @@ class PolicyCreate(BaseModel):
     rule_type: str = Field(default="semantic", max_length=50)
     parameters: dict[str, Any] | None = None
 
+    @model_validator(mode="after")
+    def validate_rule_parameters(self) -> "PolicyCreate":
+        if self.rule_type not in PolicyRuleType:
+            raise ValueError("Unsupported rule_type")
+        _validate_rule_parameters(self.rule_type, self.parameters)
+        return self
+
 
 class PolicyUpdate(BaseModel):
     """Request body for updating a policy."""
@@ -26,6 +65,19 @@ class PolicyUpdate(BaseModel):
     rule_type: str | None = Field(default=None, max_length=50)
     parameters: dict[str, Any] | None = None
     is_enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_rule_parameters(self) -> "PolicyUpdate":
+        if self.rule_type is not None and self.rule_type not in PolicyRuleType:
+            raise ValueError("Unsupported rule_type")
+
+        if self.parameters is not None and self.rule_type is None:
+            raise ValueError("rule_type must be provided when parameters are updated")
+
+        if self.rule_type is not None:
+            _validate_rule_parameters(self.rule_type, self.parameters)
+
+        return self
 
 
 class PolicyResponse(BaseModel):
@@ -53,3 +105,27 @@ class PolicyListResponse(BaseModel):
 
     policies: list[PolicyResponse]
     total: int
+
+
+class PolicyConfigUpdate(BaseModel):
+    """Request body for policy behavior configuration updates."""
+
+    injection_protection: bool | None = None
+    injection_sensitivity: Literal["strict", "moderate", "lenient"] | None = None
+    pii_redaction: bool | None = None
+    policy_enforcement: bool | None = None
+    fail_mode: Literal["open", "closed"] | None = None
+    fallback_message: str | None = None
+
+
+class PolicyConfigResponse(BaseModel):
+    """Tenant policy behavior configuration plus active version."""
+
+    tenant_id: UUID
+    active_policy_version: int
+    injection_protection: bool
+    injection_sensitivity: str
+    pii_redaction: bool
+    policy_enforcement: bool
+    fail_mode: str
+    fallback_message: str

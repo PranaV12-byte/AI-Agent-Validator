@@ -38,3 +38,18 @@ class SanitizeResponse(BaseModel):
     redactions: list[dict[str, str]]
     processing_ms: int
     audit_id: UUID
+
+
+class ValidateRequest(BaseModel):
+    """Payload for unified guardrail validation endpoint."""
+
+    prompt: str = Field(min_length=1, max_length=8000)
+    user_id: str | None = Field(default=None, max_length=128)
+
+
+class ValidateResponse(BaseModel):
+    """Response returned by /validate endpoint."""
+
+    action: str
+    reason: str
+    redacted_text: str | None = None

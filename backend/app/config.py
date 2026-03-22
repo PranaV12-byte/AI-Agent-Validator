@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
     rate_limit_per_minute: int = 60
+    perf_trace_enabled: bool = False
+    perf_trace_sample_rate: float = 0.1
+    api_key_verify_cache_ttl_seconds: int = 60
+    api_key_verify_cache_max_entries: int = 10000
 
 
 settings = Settings()

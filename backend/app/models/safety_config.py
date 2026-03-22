@@ -12,7 +12,7 @@ fail_mode:
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -47,6 +47,7 @@ class SafetyConfig(Base):
     )
 
     # ── Policy enforcement ─────────────────────────────────────────────────────
+    global_block_enabled = Column(Boolean, nullable=False, default=False)
     policy_enforcement = Column(Boolean, nullable=False, default=True)
     # 'closed' | 'open'
     fail_mode = Column(String(20), nullable=False, default="closed")
@@ -55,6 +56,7 @@ class SafetyConfig(Base):
         nullable=False,
         default="I cannot help with that request. A human agent will follow up.",
     )
+    log_retention_days = Column(Integer, nullable=False, default=30)
 
     created_at = Column(
         DateTime(timezone=True),

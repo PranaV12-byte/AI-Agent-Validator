@@ -1,45 +1,31 @@
 """Pydantic schemas for dashboard APIs."""
 
-from datetime import date, datetime
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class UsageTrend(BaseModel):
-    """Daily usage metrics for dashboard trend charts."""
-
-    date: date
-    total_requests: int
-    blocked_count: int
-    allowed_count: int
-    redacted_count: int
-    avg_latency_ms: float
-
-
 class DashboardStats(BaseModel):
-    """Top-level counters displayed on dashboard."""
+    """Top-level counters displayed on dashboard home."""
 
-    total_requests_today: int
-    blocked_today: int
-    allowed_today: int
-    redacted_today: int
-    block_rate_percent: float
+    total_requests: int
+    blocked_requests: int
     avg_latency_ms: float
-    active_policies: int
-    chain_verified_count: int
 
 
 class DashboardResponse(BaseModel):
-    """Dashboard aggregate response."""
+    """Dashboard summary response."""
 
-    stats: DashboardStats
-    trends: list[UsageTrend]
+    total_requests: int
+    blocked_requests: int
+    avg_latency_ms: float
 
 
 class SafetyConfigUpdate(BaseModel):
     """Partial update payload for tenant safety configuration."""
 
+    global_block_enabled: bool | None = None
     injection_protection: bool | None = None
     injection_sensitivity: str | None = Field(default=None, max_length=20)
     pii_redaction: bool | None = None
@@ -47,6 +33,7 @@ class SafetyConfigUpdate(BaseModel):
     policy_enforcement: bool | None = None
     fail_mode: str | None = Field(default=None, max_length=20)
     fallback_message: str | None = None
+    log_retention_days: int | None = Field(default=None, ge=1)
 
 
 class SafetyConfigResponse(BaseModel):
@@ -56,6 +43,7 @@ class SafetyConfigResponse(BaseModel):
 
     id: UUID
     tenant_id: UUID
+    global_block_enabled: bool
     injection_protection: bool
     injection_sensitivity: str
     pii_redaction: bool
@@ -63,5 +51,6 @@ class SafetyConfigResponse(BaseModel):
     policy_enforcement: bool
     fail_mode: str
     fallback_message: str
+    log_retention_days: int
     created_at: datetime
     updated_at: datetime

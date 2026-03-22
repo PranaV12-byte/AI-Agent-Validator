@@ -3,14 +3,15 @@ PII Redaction Service.
 Detects and redacts: Aadhaar, PAN, Email, Phone (Indian), UPI IDs.
 Uses RegEx for structured patterns + spaCy for named entities.
 """
+
 import re
 from dataclasses import dataclass, field
 
 
 @dataclass
 class RedactionItem:
-    type: str         # "aadhaar" | "pan" | "email" | "phone" | "upi"
-    original: str     # The matched text (partially masked)
+    type: str  # "aadhaar" | "pan" | "email" | "phone" | "upi"
+    original: str  # The matched text (partially masked)
     replacement: str  # The placeholder
 
 
@@ -59,6 +60,7 @@ class PIIRedactor:
         """Load spaCy model for NER-based detection (optional, loaded at startup)."""
         try:
             import spacy
+
             self._nlp = spacy.load("en_core_web_sm")
         except (ImportError, OSError):
             self._nlp = None  # Fallback to regex-only
@@ -97,16 +99,31 @@ class PIIRedactor:
                 # Skip UPI if it looks like a regular email (has common domain)
                 if pii_type == "upi":
                     domain = match.group().split("@")[1] if "@" in match.group() else ""
-                    if domain in ("gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "proton.me"):
+                    if domain in (
+                        "gmail",
+                        "gmail.com",
+                        "yahoo",
+                        "yahoo.com",
+                        "outlook",
+                        "outlook.com",
+                        "hotmail",
+                        "hotmail.com",
+                        "proton",
+                        "proton.me",
+                    ):
                         continue  # This is an email, not UPI
 
                 masked = mask_fn(match)
-                redactions.append(RedactionItem(
-                    type=pii_type,
-                    original=masked,
-                    replacement=replacement,
-                ))
-                sanitized = sanitized[:match.start()] + replacement + sanitized[match.end():]
+                redactions.append(
+                    RedactionItem(
+                        type=pii_type,
+                        original=masked,
+                        replacement=replacement,
+                    )
+                )
+                sanitized = (
+                    sanitized[: match.start()] + replacement + sanitized[match.end() :]
+                )
 
         return RedactionResult(
             sanitized_text=sanitized,
