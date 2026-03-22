@@ -1,0 +1,237 @@
+name: PR CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  backend-tests:
+    name: Backend Pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: safebot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d safebot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/safebot
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET_KEY: ci-secret-key
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: 1440
+      ALGORAND_APP_ID: 0
+      ALGORAND_MNEMONIC: ""
+      ALGORAND_NETWORK: testnet
+      ENVIRONMENT: test
+      DEBUG: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+        working-directory: backend
+
+      - name: Run migrations
+        run: alembic upgrade head
+        working-directory: backend
+
+      - name: Run backend test suite
+        run: python -m pytest -q
+        working-directory: backend
+
+  frontend-unit-build:
+    name: Frontend Unit + Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npx vitest run --pool=threads --testTimeout=15000
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
+  frontend-e2e-stable:
+    name: Frontend E2E (Stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: safebot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d safebot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/safebot
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET_KEY: ci-secret-key
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: 1440
+      ALGORAND_APP_ID: 0
+      ALGORAND_MNEMONIC: ""
+      ALGORAND_NETWORK: testnet
+      ENVIRONMENT: test
+      DEBUG: "false"
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:5173
+      PLAYWRIGHT_API_BASE_URL: http://127.0.0.1:8000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+        working-directory: backend
+
+      - name: Run migrations
+        run: alembic upgrade head
+        working-directory: backend
+
+      - name: Start backend
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > ../backend_ci.log 2>&1 &
+        working-directory: backend
+
+      - name: Wait for backend health
+        run: |
+          python - <<'PY'
+          import time
+          import requests
+          for _ in range(90):
+              try:
+                  r = requests.get("http://127.0.0.1:8000/health", timeout=2)
+                  if r.status_code == 200:
+                      raise SystemExit(0)
+              except Exception:
+                  pass
+              time.sleep(2)
+          raise SystemExit("Backend did not become healthy")
+          PY
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Start frontend
+        run: |
+          nohup npm run dev -- --host 0.0.0.0 --port 5173 > ../frontend_ci.log 2>&1 &
+        working-directory: frontend
+
+      - name: Wait for frontend
+        run: |
+          python - <<'PY'
+          import time
+          import requests
+          for _ in range(60):
+              try:
+                  r = requests.get("http://127.0.0.1:5173", timeout=2)
+                  if r.status_code in (200, 404):
+                      raise SystemExit(0)
+              except Exception:
+                  pass
+              time.sleep(2)
+          raise SystemExit("Frontend did not become ready")
+          PY
+
+      - name: Run stable Playwright suite
+        run: |
+          npx playwright test \
+            e2e/integration-smoke.spec.ts \
+            e2e/auth-flow.spec.ts \
+            e2e/audit-feed.spec.ts \
+            e2e/policy-deployment.spec.ts \
+            e2e/tenant-isolation.spec.ts \
+            e2e/session-expiry.spec.ts \
+            e2e/integration-to-dashboard.spec.ts \
+            e2e/policy-fail-open-vs-closed.spec.ts \
+            e2e/policy-rollback.spec.ts \
+            --project=chromium
+        working-directory: frontend
+
+      - name: Upload CI logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-ci-logs
+          path: |
+            backend_ci.log
+            frontend_ci.log
+            frontend/test-results

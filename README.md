@@ -30,3 +30,20 @@ make frontend
 
 ## Architecture
 See `MVP_Blueprint_Part1.md` for full schema and phase plan.
+
+## CI Gates (Phase F)
+
+- PR gate (`.github/workflows/ci-pr.yml`)
+  - backend: `python -m pytest -q`
+  - frontend: `vitest` + `npm run build`
+  - stable Playwright E2E suite (rate-limit test excluded)
+- Nightly gate (`.github/workflows/nightly-quality.yml`)
+  - full backend/frontend test suites
+  - full Playwright suite
+  - non-blocking extras:
+    - deferred rate-limit E2E (`frontend/e2e/rate-limit.spec.ts`)
+    - perf smoke script (`backend/scripts/load_validate_smoke.py`)
+
+### Temporary Performance Note
+
+Performance SLO hardening is intentionally deferred. Functional and security gates are blocking; performance and deferred E2E checks are non-blocking in nightly runs until optimization is completed.

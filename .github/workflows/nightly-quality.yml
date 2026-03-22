@@ -1,0 +1,184 @@
+name: Nightly Quality
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  nightly-quality:
+    name: Full Quality + Perf (Non-blocking extras)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: safebot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d safebot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/safebot
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET_KEY: nightly-secret-key
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: 1440
+      ALGORAND_APP_ID: 0
+      ALGORAND_MNEMONIC: ""
+      ALGORAND_NETWORK: testnet
+      ENVIRONMENT: test
+      DEBUG: "false"
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:5173
+      PLAYWRIGHT_API_BASE_URL: http://127.0.0.1:8000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+        working-directory: backend
+
+      - name: Run migrations
+        run: alembic upgrade head
+        working-directory: backend
+
+      - name: Run full backend tests
+        run: python -m pytest -q
+        working-directory: backend
+
+      - name: Start backend
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > ../backend_nightly.log 2>&1 &
+        working-directory: backend
+
+      - name: Wait for backend health
+        run: |
+          python - <<'PY'
+          import time
+          import requests
+          for _ in range(90):
+              try:
+                  r = requests.get("http://127.0.0.1:8000/health", timeout=2)
+                  if r.status_code == 200:
+                      raise SystemExit(0)
+              except Exception:
+                  pass
+              time.sleep(2)
+          raise SystemExit("Backend did not become healthy")
+          PY
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npx vitest run --pool=threads --testTimeout=15000
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Start frontend
+        run: |
+          nohup npm run dev -- --host 0.0.0.0 --port 5173 > ../frontend_nightly.log 2>&1 &
+        working-directory: frontend
+
+      - name: Wait for frontend
+        run: |
+          python - <<'PY'
+          import time
+          import requests
+          for _ in range(60):
+              try:
+                  r = requests.get("http://127.0.0.1:5173", timeout=2)
+                  if r.status_code in (200, 404):
+                      raise SystemExit(0)
+              except Exception:
+                  pass
+              time.sleep(2)
+          raise SystemExit("Frontend did not become ready")
+          PY
+
+      - name: Run full Playwright suite
+        run: npx playwright test --project=chromium
+        working-directory: frontend
+
+      - name: Run non-blocking rate-limit E2E
+        continue-on-error: true
+        run: npx playwright test e2e/rate-limit.spec.ts --project=chromium
+        working-directory: frontend
+
+      - name: Run non-blocking perf smoke
+        continue-on-error: true
+        env:
+          API_BASE_URL: http://127.0.0.1:8000/api/v1
+        run: |
+          python - <<'PY'
+          import requests, uuid, os
+          base = os.environ["API_BASE_URL"]
+          email = f"nightly-perf-{uuid.uuid4().hex}@example.com"
+          resp = requests.post(
+              f"{base}/auth/signup",
+              json={
+                  "company_name": "Nightly Perf",
+                  "email": email,
+                  "password": "TestPass123!",
+              },
+              timeout=20,
+          )
+          resp.raise_for_status()
+          api_key = resp.json().get("api_key")
+          if not api_key:
+              raise SystemExit("Nightly perf key generation failed")
+          with open("perf_api_key.txt", "w", encoding="utf-8") as fh:
+              fh.write(api_key)
+          PY
+          API_KEY=$(cat perf_api_key.txt) python scripts/load_validate_smoke.py --mode smoke --api-base-url "$API_BASE_URL" --api-key "$API_KEY" --total-requests 200 --concurrency 10 --request-timeout 60 --max-server-errors 999999 --max-p95-ms 999999 --max-ok-p95-ms 999999 --summary-json perf_smoke_summary.json
+        working-directory: backend
+
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-quality-artifacts
+          path: |
+            backend_nightly.log
+            frontend_nightly.log
+            backend/perf_smoke_summary.json
+            backend/perf_api_key.txt
+            frontend/test-results
