@@ -84,4 +84,26 @@ temp/
 !.prettierrc.json
 !.eslintrc.json
 
+# Keep key project JSON files tracked
+!backend/alembic/**/*.json
+!backend/**/*.schema.json
+!frontend/**/*.json
+
+# Runtime and diagnostics artifacts
+backend/perf_logs/
+backend/smoke*.json
+backend/soak*.json
+backend/tmp_*.json
+backend/*_out.txt
+backend/*_err.txt
+backend/*_status.txt
+backend/diag_*
+backend/phase*
+backend/health_*.json
+backend/health_body.txt
+backend/server_*.txt
+frontend/test-results/
+frontend/test_out*
+frontend/test_output.txt
+
 test-reports/
