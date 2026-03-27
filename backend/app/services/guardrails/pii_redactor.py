@@ -55,6 +55,11 @@ PII_PATTERNS = {
 class PIIRedactor:
     def __init__(self):
         self._nlp = None  # spaCy model (optional enhancement)
+        self._loaded = False
+
+    @property
+    def is_ready(self) -> bool:
+        return self._loaded
 
     def load_model(self):
         """Load spaCy model for NER-based detection (optional, loaded at startup)."""
@@ -64,6 +69,7 @@ class PIIRedactor:
             self._nlp = spacy.load("en_core_web_sm")
         except (ImportError, OSError):
             self._nlp = None  # Fallback to regex-only
+        self._loaded = True
 
     def redact(self, text: str, pii_types: list[str] | None = None) -> RedactionResult:
         """

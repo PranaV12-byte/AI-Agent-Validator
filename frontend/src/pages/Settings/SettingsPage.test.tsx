@@ -89,14 +89,10 @@ describe("SettingsPage", () => {
   it("activates save button when settings are modified", async () => {
     render(<SettingsPage />)
 
-    await waitFor(() => {
-      expect(fetchSafetyConfig).toHaveBeenCalled()
-    })
-
-    const saveButton = screen.getByTestId("settings-save-button")
+    const saveButton = await screen.findByTestId("settings-save-button")
     expect(saveButton).toBeDisabled()
 
-    fireEvent.click(screen.getByLabelText("Global Block Enabled"))
+    fireEvent.click(screen.getByLabelText("Block all harmful messages"))
 
     expect(saveButton).toBeEnabled()
     expect(saveButton).toHaveTextContent("Save Unsaved Changes")

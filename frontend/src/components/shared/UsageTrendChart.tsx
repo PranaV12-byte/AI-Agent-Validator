@@ -17,23 +17,9 @@ function UsageTrendChart() {
           </div>
         </div>
       </div>
-      <div className="relative w-full h-48 mt-4 overflow-hidden" data-purpose="mock-graph">
-        <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 800 120">
-          <path
-            d="M0,100 Q100,90 200,85 T400,75 T600,60 T800,55"
-            fill="none"
-            stroke="#4ADE80"
-            strokeWidth="2.5"
-          />
-          <path
-            d="M0,115 Q100,110 200,112 T400,105 T600,108 T800,105"
-            fill="none"
-            stroke="#EF4444"
-            strokeDasharray="4,2"
-            strokeWidth="1.5"
-          />
-        </svg>
-      </div>
+      <p className="text-text-muted text-sm text-center py-8" data-purpose="chart-placeholder">
+        Activity chart coming soon. Your message history will appear here once your AI is connected.
+      </p>
     </section>
   )
 }

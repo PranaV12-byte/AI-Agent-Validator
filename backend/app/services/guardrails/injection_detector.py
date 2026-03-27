@@ -46,6 +46,10 @@ class InjectionDetector:
         self._classifier = None
         self._patterns = [re.compile(p, re.IGNORECASE) for p in INJECTION_PATTERNS]
 
+    @property
+    def is_ready(self) -> bool:
+        return self._classifier is not None
+
     def load_model(self):
         """Call during app startup (lifespan). Loads model into memory once."""
         self._classifier = pipeline(

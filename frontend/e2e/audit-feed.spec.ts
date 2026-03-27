@@ -32,7 +32,7 @@ test("audit detail drawer opens from ledger row", async ({ page, request }) => {
     { timeout: 20000 },
   )
   await page.goto("/audit-log")
-  await expect(page.getByRole("heading", { name: "Audit Log" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Activity History" })).toBeVisible()
 
   const auditResponse = await auditResponsePromise
   if (!auditResponse.ok()) {

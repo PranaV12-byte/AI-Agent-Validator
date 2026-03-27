@@ -1,4 +1,3 @@
-import { Link as LinkIcon } from "lucide-react"
 
 import type { AuditLog } from "../../types/api"
 import { formatTimeAgo } from "../../utils/format"
@@ -59,8 +58,8 @@ function ActivityTable({ logs, isLoading, error }: ActivityTableProps) {
   if (!isLoading && incidents.length === 0) {
     return (
       <section className="bg-card-bg border border-border-color rounded-2xl p-10 text-center">
-        <p className="text-2xl mb-2">No data found</p>
-        <p className="text-text-muted">Make your first API call to see data.</p>
+        <p className="text-2xl mb-2">No activity yet</p>
+        <p className="text-text-muted">Once your AI tool is connected, messages will appear here automatically.</p>
       </section>
     )
   }
@@ -79,10 +78,10 @@ function ActivityTable({ logs, isLoading, error }: ActivityTableProps) {
             <tr>
               <th className="px-6 py-4 font-semibold">Time</th>
               <th className="px-6 py-4 font-semibold">Status</th>
-              <th className="px-6 py-4 font-semibold">Incident Type</th>
+              <th className="px-6 py-4 font-semibold">What happened</th>
               <th className="px-6 py-4 font-semibold">Details</th>
-              <th className="px-6 py-4 font-semibold">Latency</th>
-              <th className="px-6 py-4 font-semibold">Action</th>
+              <th className="px-6 py-4 font-semibold">Check time</th>
+              <th className="px-6 py-4 font-semibold"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border-color">
@@ -124,15 +123,7 @@ function ActivityTable({ logs, isLoading, error }: ActivityTableProps) {
                   {incident.details}
                 </td>
                 <td className="px-6 py-5 text-sm text-text-muted">{incident.latency}</td>
-                <td className="px-6 py-5">
-                  <button
-                    className="text-text-muted hover:text-white"
-                    type="button"
-                    aria-label={`Open incident ${incident.id}`}
-                  >
-                    <LinkIcon className="h-5 w-5" />
-                  </button>
-                </td>
+                <td className="px-6 py-5" />
               </tr>
             ))}
           </tbody>

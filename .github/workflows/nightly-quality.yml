@@ -165,10 +165,12 @@ jobs:
           api_key = resp.json().get("api_key")
           if not api_key:
               raise SystemExit("Nightly perf key generation failed")
-          with open("perf_api_key.txt", "w", encoding="utf-8") as fh:
+          import sys
+          print(f"::add-mask::{api_key}", file=sys.stderr)
+          with open(os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "perf_api_key.txt"), "w", encoding="utf-8") as fh:
               fh.write(api_key)
           PY
-          API_KEY=$(cat perf_api_key.txt) python scripts/load_validate_smoke.py --mode smoke --api-base-url "$API_BASE_URL" --api-key "$API_KEY" --total-requests 200 --concurrency 10 --request-timeout 60 --max-server-errors 999999 --max-p95-ms 999999 --max-ok-p95-ms 999999 --summary-json perf_smoke_summary.json
+          API_KEY=$(cat "$RUNNER_TEMP/perf_api_key.txt") python scripts/load_validate_smoke.py --mode smoke --api-base-url "$API_BASE_URL" --api-key "$API_KEY" --total-requests 200 --concurrency 10 --request-timeout 60 --max-server-errors 999999 --max-p95-ms 999999 --max-ok-p95-ms 999999 --summary-json perf_smoke_summary.json
         working-directory: backend
 
       - name: Upload nightly artifacts
@@ -180,5 +182,4 @@ jobs:
             backend_nightly.log
             frontend_nightly.log
             backend/perf_smoke_summary.json
-            backend/perf_api_key.txt
             frontend/test-results

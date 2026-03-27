@@ -7,11 +7,11 @@ test("policy deployment shows toast and card", async ({ page, request }) => {
   await login(page, tenant.email, tenant.password)
 
   await page.goto("/policies")
-  await page.getByRole("button", { name: "New Policy" }).click()
+  await page.getByRole("button", { name: "Add a Rule" }).click()
 
   const policyName = `E2E Regex ${Date.now()}`
   await page.getByLabel("Name").fill(policyName)
-  await page.getByLabel("Rule Text").fill("Detect suspicious account id")
+  await page.getByLabel("What should this rule do? (describe in plain English)").fill("Detect suspicious account id")
   await page.getByTestId("policy-rule-type").selectOption("regex_match")
   await page.getByTestId("policy-regex-pattern").fill("[A-Z]{3}-\\d{4}")
   await page.getByTestId("policy-save-button").click()
@@ -41,6 +41,6 @@ test("policy deployment shows toast and card", async ({ page, request }) => {
   expect(validate.body).toMatchObject({ action: "block" })
 
   await page.goto("/audit-log")
-  await expect(page.getByRole("heading", { name: "Audit Log" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Activity History" })).toBeVisible()
   await expect(page.locator('[data-testid^="audit-row-"]').first()).toBeVisible()
 })

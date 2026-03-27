@@ -22,7 +22,7 @@ function AuditFilterBar({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
         <div>
           <label htmlFor="action-filter" className="block text-sm text-text-muted mb-2">
-            Action
+            Filter by result
           </label>
           <select
             id="action-filter"

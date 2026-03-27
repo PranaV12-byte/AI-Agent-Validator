@@ -32,6 +32,10 @@ class PolicyEngine:
     def __init__(self):
         self._model: SentenceTransformer | None = None
 
+    @property
+    def is_ready(self) -> bool:
+        return self._model is not None
+
     def load_model(self):
         """Load embedding model at startup."""
         self._model = SentenceTransformer("all-MiniLM-L6-v2")

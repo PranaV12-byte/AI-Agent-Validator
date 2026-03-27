@@ -1,5 +1,6 @@
 """SDK-facing endpoints: /check and /sanitize."""
 
+import asyncio
 import hashlib
 import time
 from uuid import UUID
@@ -78,45 +79,59 @@ async def _insert_validate_audit_log(
     triggered_rules: list[str],
     request: Request,
 ) -> None:
-    """Write validate endpoint telemetry into audit logs."""
-    try:
-        payload_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-        violation_type = triggered_rules[0] if triggered_rules else None
-        severity = (
-            "critical" if action == "block" else "medium" if action == "flag" else "low"
-        )
+    """Write validate endpoint telemetry into audit logs, with retry on transient failure."""
+    payload_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    violation_type = triggered_rules[0] if triggered_rules else None
+    severity = (
+        "critical" if action == "block" else "medium" if action == "flag" else "low"
+    )
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
 
-        async with AsyncSessionLocal() as db:
-            log = AuditLog(
-                tenant_id=tenant_id,
-                session_id=user_id,
-                hook_type="access",
-                action="BLOCKED" if action == "block" else "ALLOWED",
-                violation_type=violation_type,
-                severity=severity,
-                input_preview=prompt[:200],
-                details={
-                    "endpoint_called": "/api/v1/validate",
-                    "latency_ms": latency_ms,
-                    "risk_score": risk_score,
-                    "action_taken": action,
-                    "triggered_rules": triggered_rules,
-                    "reason": reason,
-                },
-                payload_hash=payload_hash,
-                processing_ms=latency_ms,
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-            )
-            db.add(log)
-            await db.commit()
-    except Exception as exc:
-        logger.exception(
-            "validate_audit_insert_failed",
-            tenant_id=str(tenant_id),
-            action=action,
-            error=str(exc),
-        )
+    for attempt in range(3):
+        try:
+            async with AsyncSessionLocal() as db:
+                log = AuditLog(
+                    tenant_id=tenant_id,
+                    session_id=user_id,
+                    hook_type="access",
+                    action="BLOCKED" if action == "block" else "ALLOWED",
+                    violation_type=violation_type,
+                    severity=severity,
+                    input_preview=prompt[:200],
+                    details={
+                        "endpoint_called": "/api/v1/validate",
+                        "latency_ms": latency_ms,
+                        "risk_score": risk_score,
+                        "action_taken": action,
+                        "triggered_rules": triggered_rules,
+                        "reason": reason,
+                    },
+                    payload_hash=payload_hash,
+                    processing_ms=latency_ms,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
+                db.add(log)
+                await db.commit()
+            return
+        except Exception as exc:
+            if attempt == 2:
+                logger.exception(
+                    "validate_audit_insert_failed",
+                    tenant_id=str(tenant_id),
+                    action=action,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+            else:
+                logger.warning(
+                    "validate_audit_insert_retry",
+                    tenant_id=str(tenant_id),
+                    attempt=attempt,
+                    error=str(exc),
+                )
+                await asyncio.sleep(2**attempt)
 
 
 @validate_router.post("/validate", response_model=ValidateResponse)
@@ -212,6 +227,7 @@ async def validate_prompt(
 
 
 @router.post("/check", response_model=CheckResponse)
+@limiter.limit("100/minute")
 async def check_message(
     body: CheckRequest,
     request: Request,
@@ -371,6 +387,7 @@ async def check_message(
 
 
 @router.post("/sanitize", response_model=SanitizeResponse)
+@limiter.limit("100/minute")
 async def sanitize_message(
     body: SanitizeRequest,
     request: Request,

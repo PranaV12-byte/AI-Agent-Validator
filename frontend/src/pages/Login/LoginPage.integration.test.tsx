@@ -33,7 +33,7 @@ describe("Login integration", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }))
 
     await waitFor(() => {
-      expect(screen.getByText("Security Overview")).toBeInTheDocument()
+      expect(screen.getByText("Your AI Protection Dashboard")).toBeInTheDocument()
     })
   })
 

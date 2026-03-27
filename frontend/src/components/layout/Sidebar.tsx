@@ -1,8 +1,7 @@
 import {
-  Bell,
-  Code,
   FileText,
   LayoutGrid,
+  Plug,
   Settings,
   ShieldCheck,
 } from "lucide-react"
@@ -18,10 +17,10 @@ type NavItem = {
 }
 
 const navItems: NavItem[] = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutGrid },
-  { to: "/audit-log", label: "Audit Log", icon: FileText },
-  { to: "/policies", label: "Policies", icon: ShieldCheck },
-  { to: "/integration", label: "Integration", icon: Code },
+  { to: "/dashboard", label: "Home", icon: LayoutGrid },
+  { to: "/audit-log", label: "Activity History", icon: FileText },
+  { to: "/policies", label: "Protection Rules", icon: ShieldCheck },
+  { to: "/integration", label: "Connect Your AI", icon: Plug },
   { to: "/settings", label: "Settings", icon: Settings },
 ]
 
@@ -66,7 +65,6 @@ function Sidebar() {
           <p className="text-sm font-medium truncate">{user?.company_name ?? "Tenant"}</p>
           <p className="text-xs text-text-muted truncate">{user?.email ?? "--"}</p>
         </div>
-        <Bell className="w-4 h-4 text-text-muted ml-auto" />
       </div>
     </aside>
   )

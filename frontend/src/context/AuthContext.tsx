@@ -1,9 +1,10 @@
 import type { ReactNode } from "react"
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import axios from "axios"
 
-import { fetchTenantProfile, loginRequest } from "../services/authService"
+import { fetchTenantProfile, loginRequest, logoutRequest, refreshTokenRequest } from "../services/authService"
 import {
+  registerRefreshHandler,
   registerSessionProvider,
   registerUnauthorizedHandler,
 } from "../services/apiClient"
@@ -11,6 +12,7 @@ import type { TenantProfile } from "../types/api"
 
 type AuthSession = {
   accessToken: string
+  refreshToken: string | null
 }
 
 type LoginInput = {
@@ -33,18 +35,40 @@ const STORAGE_KEY = "safebot.auth.session"
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const parts = token.split(".")
+    if (parts.length !== 3) return true
+    const payload = JSON.parse(
+      atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")),
+    ) as { exp?: number }
+    if (!payload.exp) return false
+    // 30-second buffer to avoid accepting tokens that expire mid-request
+    return Date.now() / 1000 > payload.exp - 30
+  } catch {
+    return true
+  }
+}
+
 function loadSession(): AuthSession | null {
   const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) {
-    return null
-  }
+  if (!raw) return null
 
   try {
-    const parsed = JSON.parse(raw) as AuthSession
-    if (!parsed.accessToken) {
-      return null
+    const parsed = JSON.parse(raw) as Partial<AuthSession>
+    if (!parsed.accessToken) return null
+    const refreshToken = parsed.refreshToken ?? null
+
+    if (isTokenExpired(parsed.accessToken)) {
+      if (!refreshToken) {
+        // No way to silently refresh — force re-login.
+        localStorage.removeItem(STORAGE_KEY)
+        return null
+      }
+      // Expired access token but valid refresh token — keep session for silent refresh.
+      return { accessToken: parsed.accessToken, refreshToken }
     }
-    return parsed
+    return { accessToken: parsed.accessToken, refreshToken }
   } catch {
     return null
   }
@@ -56,12 +80,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Ref keeps logout and performTokenRefresh stable (no dep on session state).
+  const sessionRef = useRef<AuthSession | null>(null)
+  sessionRef.current = session
+
   const logout = useCallback(() => {
+    // Best-effort server-side revocation (fire-and-forget).
+    const refreshToken = sessionRef.current?.refreshToken ?? null
+    logoutRequest(refreshToken).catch(() => {/* ignore — local session cleared regardless */})
     localStorage.removeItem(STORAGE_KEY)
     setSession(null)
     setUser(null)
     setIsLoading(false)
   }, [])
+
+  const performTokenRefresh = useCallback(async () => {
+    const currentRefreshToken = sessionRef.current?.refreshToken
+    if (!currentRefreshToken) {
+      logout()
+      return
+    }
+    try {
+      const auth = await refreshTokenRequest(currentRefreshToken)
+      const nextSession: AuthSession = {
+        accessToken: auth.access_token,
+        refreshToken: auth.refresh_token ?? null,
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession))
+      setSession(nextSession)
+    } catch {
+      logout()
+    }
+  }, [logout])
 
   useEffect(() => {
     const restored = loadSession()
@@ -74,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const auth = await loginRequest(input)
     const nextSession: AuthSession = {
       accessToken: auth.access_token,
+      refreshToken: auth.refresh_token ?? null,
     }
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession))
@@ -117,11 +168,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [session])
 
   useEffect(() => {
-    registerUnauthorizedHandler(() => {
-      logout()
-      window.location.replace("/login")
-    })
+    registerRefreshHandler(performTokenRefresh)
+    return () => {
+      registerRefreshHandler(null)
+    }
+  }, [performTokenRefresh])
 
+  useEffect(() => {
+    registerUnauthorizedHandler(logout)
     return () => {
       registerUnauthorizedHandler(null)
     }

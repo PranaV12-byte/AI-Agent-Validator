@@ -20,7 +20,7 @@ test("integration page shows api key prefix and copy controls", async ({ page, r
 
   const expectedPrefix = tenant.apiKey!.slice(0, 8)
 
-  await expect(page.getByRole("heading", { name: "Integration" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Connect Your AI Tool" })).toBeVisible()
   await expect(page.getByText(expectedPrefix)).toBeVisible()
   await expect(page.getByTestId("snippet-python-copy")).toBeVisible()
   await expect(page.getByTestId("snippet-node-copy")).toBeVisible()

@@ -132,7 +132,7 @@ function SettingsPage() {
     <section className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold mb-2">Settings</h1>
-        <p className="text-text-muted">Manage global security posture and developer access.</p>
+        <p className="text-text-muted">Control how Safebot protects your AI and manage your connection details.</p>
       </div>
 
       {error ? (
@@ -141,7 +141,7 @@ function SettingsPage() {
         </p>
       ) : null}
 
-      <SecurityPostureCard form={form} onChange={setForm} />
+      <SecurityPostureCard form={form} onChange={setForm} isLoading={config === null} />
 
       <DeveloperSettingsCard
         tenantId={user?.id ?? null}

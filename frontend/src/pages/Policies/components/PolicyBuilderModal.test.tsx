@@ -45,7 +45,7 @@ describe("PolicyBuilderModal", () => {
     expect(saveButton).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Regex policy" } })
-    fireEvent.change(screen.getByLabelText("Rule Text"), {
+    fireEvent.change(screen.getByLabelText("What should this rule do? (describe in plain English)"), {
       target: { value: "Detect credential leak" },
     })
     fireEvent.change(screen.getByTestId("policy-rule-type"), {

@@ -90,9 +90,9 @@ function PolicyPage() {
   return (
     <section className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Policy Configuration</h1>
+        <h1 className="text-3xl font-bold">Protection Settings</h1>
         <p className="text-text-muted mt-1">
-          Deployment v{config?.active_policy_version ?? 0}.0
+          Last updated: version {config?.active_policy_version ?? 0}.0
         </p>
       </div>
 
@@ -111,39 +111,45 @@ function PolicyPage() {
           </div>
         ) : (
           <>
-            <label className="flex items-center justify-between">
-              <span className="text-sm text-text-muted">Detect Prompt Injection</span>
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-text-muted">Block AI manipulation attempts</span>
+                <p className="text-xs text-text-muted/70 mt-0.5">Stops people from tricking your AI into ignoring its rules.</p>
+              </div>
               <input
-                aria-label="Detect Prompt Injection"
+                aria-label="Block AI manipulation attempts"
                 type="checkbox"
                 checked={injectionProtection}
                 onChange={(event) => setInjectionProtection(event.target.checked)}
               />
-            </label>
+            </div>
 
-            <label className="flex items-center justify-between">
-              <span className="text-sm text-text-muted">PII Redaction Level</span>
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-text-muted">Hide personal info automatically</span>
+                <p className="text-xs text-text-muted/70 mt-0.5">Removes names, emails, and phone numbers from messages.</p>
+              </div>
               <input
-                aria-label="PII Redaction Level"
+                aria-label="Hide personal info automatically"
                 type="checkbox"
                 checked={piiRedaction}
                 onChange={(event) => setPiiRedaction(event.target.checked)}
               />
-            </label>
+            </div>
 
             <div>
               <label htmlFor="fail-mode" className="block text-sm text-text-muted mb-2">
-                Fail Mode
+                If something goes wrong
               </label>
               <select
                 id="fail-mode"
-                aria-label="Fail Mode"
+                aria-label="If something goes wrong"
                 value={failMode}
                 onChange={(event) => setFailMode(event.target.value as "open" | "closed")}
                 className="bg-dashboard-bg border border-border-color rounded-lg px-3 py-2.5 text-sm"
               >
-                <option value="closed">Closed</option>
-                <option value="open">Open</option>
+                <option value="closed">Block the message (safe)</option>
+                <option value="open">Allow the message (risky)</option>
               </select>
             </div>
           </>
@@ -157,7 +163,7 @@ function PolicyPage() {
         disabled={isDeploying || !hasChanges}
         className="rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green px-5 py-3 font-medium hover:bg-brand-green/20 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isDeploying ? "Deploying..." : "Deploy Changes"}
+        {isDeploying ? "Saving..." : "Save & Apply Changes"}
       </button>
     </section>
   )

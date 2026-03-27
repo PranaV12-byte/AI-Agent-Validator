@@ -111,7 +111,7 @@ function PoliciesPage() {
               : "border-border-color text-text-muted hover:text-white",
           ].join(" ")}
         >
-          Rules
+          My Protection Rules
         </button>
         <button
           type="button"
@@ -123,7 +123,7 @@ function PoliciesPage() {
               : "border-border-color text-text-muted hover:text-white",
           ].join(" ")}
         >
-          Configuration
+          Settings
         </button>
       </div>
 

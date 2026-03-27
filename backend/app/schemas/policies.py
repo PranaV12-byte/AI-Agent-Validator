@@ -1,10 +1,13 @@
 """Pydantic schemas for policy APIs."""
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 PolicyRuleType = (
     "semantic",
@@ -48,6 +51,14 @@ class PolicyCreate(BaseModel):
     rule_type: str = Field(default="semantic", max_length=50)
     parameters: dict[str, Any] | None = None
 
+    @field_validator("name", "description", mode="before")
+    @classmethod
+    def strip_html(cls, value: str | None) -> str | None:
+        """Strip HTML/script tags from string fields to prevent XSS."""
+        if isinstance(value, str):
+            return _HTML_TAG_RE.sub("", value).strip()
+        return value
+
     @model_validator(mode="after")
     def validate_rule_parameters(self) -> "PolicyCreate":
         if self.rule_type not in PolicyRuleType:
@@ -65,6 +76,14 @@ class PolicyUpdate(BaseModel):
     rule_type: str | None = Field(default=None, max_length=50)
     parameters: dict[str, Any] | None = None
     is_enabled: bool | None = None
+
+    @field_validator("name", "description", mode="before")
+    @classmethod
+    def strip_html(cls, value: str | None) -> str | None:
+        """Strip HTML/script tags from string fields to prevent XSS."""
+        if isinstance(value, str):
+            return _HTML_TAG_RE.sub("", value).strip()
+        return value
 
     @model_validator(mode="after")
     def validate_rule_parameters(self) -> "PolicyUpdate":

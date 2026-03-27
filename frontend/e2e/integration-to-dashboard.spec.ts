@@ -29,12 +29,12 @@ test("validate call propagates to dashboard metrics and audit ledger", async ({ 
   await login(page, tenant.email, tenant.password)
 
   await page.goto("/dashboard")
-  await expect(page.getByText("Security Overview")).toBeVisible()
+  await expect(page.getByText("Your AI Protection Dashboard")).toBeVisible()
 
   const blockedCard = page.locator('[data-purpose="kpi-card"]').filter({ hasText: "Blocked" })
   await expect(blockedCard).toContainText("1", { timeout: 30000 })
 
   await page.goto("/audit-log")
-  await expect(page.getByRole("heading", { name: "Audit Log" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Activity History" })).toBeVisible()
   await expect(page.locator('[data-testid^="audit-row-"]').first()).toBeVisible({ timeout: 30000 })
 })

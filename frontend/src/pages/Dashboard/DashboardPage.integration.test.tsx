@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import { http, HttpResponse } from "msw"
+import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it } from "vitest"
 
 import { server } from "../../mocks/server"
@@ -7,7 +8,7 @@ import DashboardPage from "./DashboardPage"
 
 describe("Dashboard integration", () => {
   it("hydrates metrics and ledger rows from mocked APIs", async () => {
-    render(<DashboardPage />)
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>)
 
     await waitFor(() => {
       expect(screen.getByText("Recent Activity")).toBeInTheDocument()
@@ -30,16 +31,14 @@ describe("Dashboard integration", () => {
         })
       }),
       http.get("*/api/v1/audit/", () => {
-        return HttpResponse.json([])
+        return HttpResponse.json({ logs: [], total: 0, page: 1, page_size: 20 })
       }),
     )
 
-    render(<DashboardPage />)
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>)
 
-    const emptyStates = await screen.findAllByText("No data found")
-    expect(emptyStates.length).toBeGreaterThanOrEqual(1)
-    const emptyCtas = screen.getAllByText("Make your first API call to see data.")
-    expect(emptyCtas.length).toBeGreaterThanOrEqual(1)
+    expect(await screen.findByText("Welcome to Safebot — let's get you set up")).toBeInTheDocument()
+    expect(screen.getByText("Follow these steps to protect your AI assistant.")).toBeInTheDocument()
   })
 
   it("renders metrics error state when stats API fails", async () => {
@@ -48,12 +47,13 @@ describe("Dashboard integration", () => {
         return HttpResponse.json({ detail: "boom" }, { status: 500 })
       }),
       http.get("*/api/v1/audit/", () => {
-        return HttpResponse.json([])
+        return HttpResponse.json({ logs: [], total: 0, page: 1, page_size: 20 })
       }),
     )
 
-    render(<DashboardPage />)
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>)
 
-    expect(await screen.findByText("Unable to fetch security metrics at this time.")).toBeInTheDocument()
+    // Allow extra time for the retry backoff (2 retries × 500ms/1000ms delays)
+    expect(await screen.findByText("Unable to fetch security metrics at this time.", {}, { timeout: 5000 })).toBeInTheDocument()
   })
 })

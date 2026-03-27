@@ -1,8 +1,11 @@
 """Celery worker for async tasks: Algorand TX submission, report generation."""
 
+import structlog
 from celery import Celery
 
 from app.config import settings
+
+logger = structlog.get_logger()
 
 celery_app = Celery(
     "safebot",
@@ -20,6 +23,12 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_default_retry_delay=30,
     task_max_retries=3,
+    # Dead-letter queue: failed tasks are routed to a dedicated queue for inspection.
+    task_queues={
+        "default": {"exchange": "default", "routing_key": "default"},
+        "dead_letter": {"exchange": "dead_letter", "routing_key": "dead_letter"},
+    },
+    task_default_queue="default",
 )
 
 
@@ -44,7 +53,16 @@ def submit_to_chain_task(
         _update_audit_tx_id(audit_log_id, tx_id)
         return {"status": "success", "tx_id": tx_id}
     except Exception as exc:
-        raise self.retry(exc=exc)
+        attempt = self.request.retries
+        if attempt >= self.max_retries:
+            logger.error(
+                "algorand_submit_permanently_failed",
+                audit_log_id=audit_log_id,
+                error=str(exc),
+            )
+            return {"status": "failed", "error": str(exc)}
+        countdown = 30 * (2 ** attempt)  # 30s, 60s, 120s
+        raise self.retry(exc=exc, countdown=countdown)
 
 
 @celery_app.task(bind=True, name="register_policy_on_chain", max_retries=3)
@@ -61,7 +79,16 @@ def register_policy_on_chain_task(
         _update_policy_tx_id(policy_id, tx_id)
         return {"status": "success", "tx_id": tx_id}
     except Exception as exc:
-        raise self.retry(exc=exc)
+        attempt = self.request.retries
+        if attempt >= self.max_retries:
+            logger.error(
+                "algorand_policy_registration_permanently_failed",
+                policy_id=policy_id,
+                error=str(exc),
+            )
+            return {"status": "failed", "error": str(exc)}
+        countdown = 30 * (2 ** attempt)
+        raise self.retry(exc=exc, countdown=countdown)
 
 
 def _update_audit_tx_id(audit_log_id: str, tx_id: str) -> None:

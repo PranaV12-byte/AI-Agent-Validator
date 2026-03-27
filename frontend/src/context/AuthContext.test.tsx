@@ -1,25 +1,18 @@
 import { AxiosError } from "axios"
-import { render, screen, waitFor } from "@testing-library/react"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest"
 
 import { AuthProvider } from "./AuthContext"
 import { useAuth } from "../hooks/useAuth"
 import { fetchTenantProfile, loginRequest } from "../services/authService"
-import { registerUnauthorizedHandler } from "../services/apiClient"
+import * as apiClientModule from "../services/apiClient"
 
 vi.mock("../services/authService", () => ({
   fetchTenantProfile: vi.fn(),
   loginRequest: vi.fn(),
+  logoutRequest: vi.fn().mockResolvedValue(undefined),
 }))
-
-vi.mock("../services/apiClient", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../services/apiClient")>()
-  return {
-    ...actual,
-    registerUnauthorizedHandler: vi.fn(),
-  }
-})
 
 function Probe() {
   const { isAuthenticated, isLoading, user } = useAuth()
@@ -37,6 +30,10 @@ function Wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("AuthContext", () => {
+  afterEach(() => {
+    cleanup()
+  })
+
   beforeEach(() => {
     vi.mocked(loginRequest).mockReset()
     vi.mocked(fetchTenantProfile).mockReset()
@@ -73,13 +70,18 @@ describe("AuthContext", () => {
     expect(screen.getByTestId("user-state")).toHaveTextContent("none")
   })
 
-  it("registers unauthorized handler during provider lifecycle", () => {
+  it("registers unauthorized handler during provider lifecycle", async () => {
+    const spy = vi.spyOn(apiClientModule, "registerUnauthorizedHandler")
+
     const { unmount } = render(<Probe />, { wrapper: Wrapper })
 
-    expect(registerUnauthorizedHandler).toHaveBeenCalled()
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalled()
+    })
 
     unmount()
 
-    expect(registerUnauthorizedHandler).toHaveBeenLastCalledWith(null)
+    expect(spy).toHaveBeenLastCalledWith(null)
+    spy.mockRestore()
   })
 })

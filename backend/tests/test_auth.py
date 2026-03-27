@@ -77,6 +77,32 @@ def test_regenerate_key_invalidates_old_key_and_returns_new_raw_key(client: Test
     assert new_key_response.status_code == 200
 
 
+def test_logout_invalidates_token(client: TestClient):
+    auth = _signup(client, str(uuid4()))
+    token = auth["access_token"]
+
+    # Token works before logout
+    before = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert before.status_code == 200
+
+    # Logout
+    logout = client.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert logout.status_code == 200
+
+    # Token should be rejected after logout
+    after = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert after.status_code == 401
+
+
 def test_tenant_cannot_access_another_tenant_profile(client: TestClient):
     tenant_a = _signup(client, str(uuid4()))
     tenant_b = _signup(client, str(uuid4()))

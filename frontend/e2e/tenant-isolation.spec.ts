@@ -21,11 +21,11 @@ test("tenant B cannot see tenant A dashboard or audit activity", async ({ page, 
   await login(page, tenantB.email, tenantB.password)
 
   await page.goto("/dashboard")
-  await expect(page.getByText("Security Overview")).toBeVisible()
-  await expect(page.getByText("Requests Today")).toBeVisible()
-  await expect(page.getByRole("heading", { name: "No data found" })).toBeVisible()
+  await expect(page.getByText("Your AI Protection Dashboard")).toBeVisible()
+  await expect(page.getByText("Messages Checked")).toBeVisible()
+  await expect(page.getByText("No activity yet")).toBeVisible()
 
   await page.goto("/audit-log")
-  await expect(page.getByRole("heading", { name: "Audit Log" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Activity History" })).toBeVisible()
   await expect(page.getByText("No audit logs found")).toBeVisible()
 })

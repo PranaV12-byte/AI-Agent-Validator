@@ -12,8 +12,11 @@ function LoginPage() {
 
   const redirectUri = useMemo(() => {
     const value = searchParams.get("redirect_uri")
-    return value && value.startsWith("/") ? value : "/dashboard"
+    return value && value.startsWith("/") && !value.startsWith("//") ? value : "/dashboard"
   }, [searchParams])
+
+  const justSignedUp = searchParams.get("signup") === "1"
+  const justReset = searchParams.get("reset") === "1"
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -48,6 +51,18 @@ function LoginPage() {
           </div>
         </div>
 
+        {justSignedUp ? (
+          <p className="text-sm text-brand-green bg-brand-green/10 border border-brand-green/30 rounded-lg px-3 py-2 mb-6">
+            Account created! Please sign in to continue.
+          </p>
+        ) : null}
+
+        {justReset ? (
+          <p className="text-sm text-brand-green bg-brand-green/10 border border-brand-green/30 rounded-lg px-3 py-2 mb-6">
+            Password updated! Sign in with your new password.
+          </p>
+        ) : null}
+
         <form className="space-y-5" onSubmit={handleSubmit}>
           <div>
             <label htmlFor="email" className="block text-sm text-text-muted mb-2">
@@ -64,9 +79,18 @@ function LoginPage() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm text-text-muted mb-2">
-              Password
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label htmlFor="password" className="block text-sm text-text-muted">
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => navigate("/forgot-password")}
+                className="text-xs text-brand-green hover:underline cursor-pointer"
+              >
+                Forgot password?
+              </button>
+            </div>
             <input
               id="password"
               type="password"
@@ -91,6 +115,16 @@ function LoginPage() {
             {isSubmitting ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
+        <div className="mt-6 text-center text-sm text-text-muted">
+          Need an account?{" "}
+          <button
+            onClick={() => navigate("/signup")}
+            className="text-brand-green hover:underline cursor-pointer"
+          >
+            Sign up here
+          </button>
+        </div>
       </div>
     </div>
   )

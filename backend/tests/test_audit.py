@@ -109,7 +109,8 @@ def test_audit_endpoint_filters_by_action(client: TestClient):
     )
 
     assert response.status_code == 200
-    logs = response.json()
+    data = response.json()
+    logs = data["logs"]
     assert logs
     assert all(log["action"] == "BLOCKED" for log in logs)
 
@@ -126,8 +127,11 @@ def test_audit_endpoint_honors_limit(client: TestClient):
     )
 
     assert response.status_code == 200
-    logs = response.json()
-    assert len(logs) == 10
+    data = response.json()
+    assert len(data["logs"]) == 10
+    assert data["total"] >= 50
+    assert data["page"] == 1
+    assert data["page_size"] == 10
 
 
 def test_audit_endpoint_is_tenant_isolated(client: TestClient):
@@ -154,11 +158,11 @@ def test_audit_endpoint_is_tenant_isolated(client: TestClient):
 
     assert logs_a.status_code == 200
     assert logs_b.status_code == 200
-    assert len(logs_a.json()) >= 6
-    assert len(logs_b.json()) >= 4
+    assert logs_a.json()["total"] >= 6
+    assert logs_b.json()["total"] >= 4
 
-    ids_a = {entry["tenant_id"] for entry in logs_a.json()}
-    ids_b = {entry["tenant_id"] for entry in logs_b.json()}
+    ids_a = {entry["tenant_id"] for entry in logs_a.json()["logs"]}
+    ids_b = {entry["tenant_id"] for entry in logs_b.json()["logs"]}
     assert str(tenant_a_id) in ids_a
     assert str(tenant_b_id) not in ids_a
     assert str(tenant_b_id) in ids_b

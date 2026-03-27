@@ -10,13 +10,37 @@ type PolicyBuilderModalProps = {
   onSave: (payload: PolicyCreatePayload) => Promise<void>
 }
 
-const RULE_TYPE_OPTIONS: Array<{ label: string; value: PolicyRuleType }> = [
-  { label: "PII Redaction", value: "pii_redaction" },
-  { label: "Prompt Injection", value: "prompt_injection" },
-  { label: "Regex Match", value: "regex_match" },
-  { label: "LLM Eval", value: "llm_eval" },
-  { label: "Keyword", value: "keyword" },
-  { label: "Semantic", value: "semantic" },
+const RULE_TYPE_OPTIONS: Array<{ label: string; value: PolicyRuleType; description: string }> = [
+  {
+    label: "Hide Personal Info",
+    value: "pii_redaction",
+    description: "Automatically hide names, emails, phone numbers, and other personal details from messages.",
+  },
+  {
+    label: "Block Manipulation",
+    value: "prompt_injection",
+    description: "Stop attempts to trick or hijack your AI into doing something it shouldn't.",
+  },
+  {
+    label: "Pattern Match",
+    value: "regex_match",
+    description: "Advanced: match messages using a text pattern (e.g. phone number formats).",
+  },
+  {
+    label: "AI Content Check",
+    value: "llm_eval",
+    description: "Use AI to judge whether a message violates a rule you describe in plain English.",
+  },
+  {
+    label: "Word Match",
+    value: "keyword",
+    description: "Block or flag any message containing a specific word or phrase you choose.",
+  },
+  {
+    label: "Meaning Match",
+    value: "semantic",
+    description: "Block messages that mean the same thing as your rule, even if worded differently.",
+  },
 ]
 
 function PolicyBuilderModal({
@@ -91,7 +115,7 @@ function PolicyBuilderModal({
   return (
     <aside className="fixed top-0 right-0 h-full w-full max-w-xl bg-sidebar-bg border-l border-border-color shadow-2xl z-50 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold">{mode === "create" ? "New Policy" : "Edit Policy"}</h2>
+        <h2 className="text-xl font-bold">{mode === "create" ? "New Protection Rule" : "Edit Protection Rule"}</h2>
         <button type="button" onClick={onClose} className="text-text-muted hover:text-white">
           Close
         </button>
@@ -125,7 +149,7 @@ function PolicyBuilderModal({
 
         <div>
           <label htmlFor="policy-rule-type" className="block text-sm text-text-muted mb-2">
-            Rule Type
+            Protection type
           </label>
           <select
             id="policy-rule-type"
@@ -140,11 +164,16 @@ function PolicyBuilderModal({
               </option>
             ))}
           </select>
+          {RULE_TYPE_OPTIONS.find((o) => o.value === ruleType)?.description ? (
+            <p className="text-xs text-text-muted mt-1">
+              {RULE_TYPE_OPTIONS.find((o) => o.value === ruleType)?.description}
+            </p>
+          ) : null}
         </div>
 
         <div>
           <label htmlFor="policy-rule-text" className="block text-sm text-text-muted mb-2">
-            Rule Text
+            What should this rule do? (describe in plain English)
           </label>
           <textarea
             id="policy-rule-text"
@@ -158,7 +187,7 @@ function PolicyBuilderModal({
         {ruleType === "regex_match" ? (
           <div>
             <label htmlFor="policy-regex-pattern" className="block text-sm text-text-muted mb-2">
-              Regex Pattern
+              Text Pattern (e.g. \d{"{3}"}-\d{"{4}"} for phone numbers)
             </label>
             <input
               id="policy-regex-pattern"
@@ -173,7 +202,7 @@ function PolicyBuilderModal({
         {ruleType === "llm_eval" ? (
           <div>
             <label htmlFor="policy-llm-rubric" className="block text-sm text-text-muted mb-2">
-              LLM Rubric
+              Describe your rule in plain English
             </label>
             <textarea
               id="policy-llm-rubric"
@@ -189,7 +218,7 @@ function PolicyBuilderModal({
         {ruleType === "keyword" ? (
           <div>
             <label htmlFor="policy-keyword" className="block text-sm text-text-muted mb-2">
-              Keyword
+              Word or phrase to block
             </label>
             <input
               id="policy-keyword"

@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react"
+
 type DeveloperSettingsCardProps = {
   tenantId: string | null
   apiKeyPrefix: string | null
@@ -17,12 +19,15 @@ function DeveloperSettingsCard({
   onCopyPrefix,
   onCopyNewKey,
 }: DeveloperSettingsCardProps) {
+  const [showKey, setShowKey] = useState(false)
+  useEffect(() => { setShowKey(false) }, [newApiKey])
+
   return (
     <section className="border border-border-color rounded-xl p-5 bg-dashboard-bg/40 space-y-4">
       <h2 className="text-lg font-semibold">Developer Settings</h2>
 
       <p className="text-sm text-text-muted break-all">
-        Tenant ID: <span className="text-white">{tenantId ?? "--"}</span>
+        Your account ID: <span className="text-white">{tenantId ?? "--"}</span>
       </p>
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -49,17 +54,28 @@ function DeveloperSettingsCard({
 
       {newApiKey ? (
         <div className="space-y-2">
-          <p className="text-xs uppercase tracking-wide text-text-muted">New API key (copy now)</p>
-          <div className="bg-card-bg border border-border-color rounded-lg p-3 text-sm font-mono break-all">
-            {newApiKey}
+          <p className="text-xs uppercase tracking-wide text-text-muted">
+            New API key (copy now — it won't be shown again)
+          </p>
+          <div className="bg-card-bg border border-border-color rounded-lg p-3 text-sm font-mono break-all select-none">
+            {showKey ? newApiKey : `${newApiKey.slice(0, 8)}${"*".repeat(24)}`}
           </div>
-          <button
-            type="button"
-            onClick={() => void onCopyNewKey()}
-            className="text-sm text-text-muted hover:text-white"
-          >
-            Copy key
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => void onCopyNewKey()}
+              className="text-sm text-text-muted hover:text-white"
+            >
+              Copy key
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowKey((prev) => !prev)}
+              className="text-sm text-text-muted hover:text-white"
+            >
+              {showKey ? "Hide" : "Reveal"}
+            </button>
+          </div>
         </div>
       ) : null}
     </section>

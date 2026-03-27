@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import type { AuditLog } from "../../types/api"
@@ -32,6 +32,8 @@ function AuditLogPage() {
           page,
           page_size: PAGE_SIZE,
           action: action === "ALL" ? undefined : action,
+          start_date: startDate || undefined,
+          end_date: endDate || undefined,
         })
         if (!cancelled) {
           setLogs(response.logs)
@@ -54,34 +56,13 @@ function AuditLogPage() {
     return () => {
       cancelled = true
     }
-  }, [action, page])
-
-  const filteredLogs = useMemo(() => {
-    return logs.filter((log) => {
-      if (!startDate && !endDate) {
-        return true
-      }
-
-      const created = new Date(log.created_at)
-      const start = startDate ? new Date(`${startDate}T00:00:00`) : null
-      const end = endDate ? new Date(`${endDate}T23:59:59`) : null
-
-      if (start && created < start) {
-        return false
-      }
-      if (end && created > end) {
-        return false
-      }
-
-      return true
-    })
-  }, [endDate, logs, startDate])
+  }, [action, page, startDate, endDate])
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-1">Audit Log</h1>
-        <p className="text-text-muted">Historical ledger of all guarded interactions.</p>
+        <h1 className="text-3xl font-bold mb-1">Activity History</h1>
+        <p className="text-text-muted">A record of every message your AI assistant checked.</p>
       </div>
 
       <AuditFilterBar
@@ -92,12 +73,12 @@ function AuditLogPage() {
           setAction(value)
           setPage(1)
         }}
-        onStartDateChange={setStartDate}
-        onEndDateChange={setEndDate}
+        onStartDateChange={(value) => { setStartDate(value); setPage(1) }}
+        onEndDateChange={(value) => { setEndDate(value); setPage(1) }}
       />
 
       <AuditTable
-        logs={filteredLogs}
+        logs={logs}
         isLoading={isLoading}
         error={error}
         onSelectLog={setSelectedLog}

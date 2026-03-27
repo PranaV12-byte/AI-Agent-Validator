@@ -1,0 +1,8 @@
+line-length = 120
+
+[lint]
+extend-select = ["E", "F", "W"]
+
+[lint.per-file-ignores]
+"alembic/versions/*.py" = ["F401", "E402"]
+"scripts/*.py" = ["E501"]

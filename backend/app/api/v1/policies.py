@@ -65,8 +65,18 @@ async def update_policy_config(
         raise HTTPException(status_code=404, detail="Safety config not found")
 
     update_data = body.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(config, key, value)
+    if "injection_protection" in update_data:
+        config.injection_protection = update_data["injection_protection"]
+    if "injection_sensitivity" in update_data:
+        config.injection_sensitivity = update_data["injection_sensitivity"]
+    if "pii_redaction" in update_data:
+        config.pii_redaction = update_data["pii_redaction"]
+    if "policy_enforcement" in update_data:
+        config.policy_enforcement = update_data["policy_enforcement"]
+    if "fail_mode" in update_data:
+        config.fail_mode = update_data["fail_mode"]
+    if "fallback_message" in update_data:
+        config.fallback_message = update_data["fallback_message"]
 
     tenant.active_policy_version += 1
     await db.commit()
@@ -145,8 +155,18 @@ async def update_policy(
         raise HTTPException(status_code=404, detail="Policy not found")
 
     update_data = body.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(policy, key, value)
+    if "name" in update_data:
+        policy.name = update_data["name"]
+    if "description" in update_data:
+        policy.description = update_data["description"]
+    if "rule_text" in update_data:
+        policy.rule_text = update_data["rule_text"]
+    if "rule_type" in update_data:
+        policy.rule_type = update_data["rule_type"]
+    if "parameters" in update_data:
+        policy.parameters = update_data["parameters"]
+    if "is_enabled" in update_data:
+        policy.is_enabled = update_data["is_enabled"]
 
     if "rule_text" in update_data:
         policy.policy_hash = policy_engine.compute_hash(policy.rule_text)

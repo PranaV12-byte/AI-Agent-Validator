@@ -7,7 +7,7 @@ test("expired session redirects tenant to login", async ({ page, request }) => {
   await login(page, tenant.email, tenant.password)
 
   await page.goto("/dashboard")
-  await expect(page.getByText("Security Overview")).toBeVisible()
+  await expect(page.getByText("Your AI Protection Dashboard")).toBeVisible()
 
   await page.context().addCookies([
     {

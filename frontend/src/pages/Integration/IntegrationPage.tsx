@@ -149,8 +149,43 @@ for (let attempt = 0; attempt < 5; attempt += 1) {
   return (
     <section className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold mb-2">Integration</h1>
-        <p className="text-text-muted">Use these snippets to call the Safebot validation API from your backend.</p>
+        <h1 className="text-2xl font-bold mb-2">Connect Your AI Tool</h1>
+        <p className="text-text-muted">Follow these steps to connect your AI assistant to Safebot. You can share this page with your developer.</p>
+      </div>
+
+      <div className="bg-card-bg border border-border-color rounded-2xl p-6 space-y-4">
+        {[
+          {
+            num: 1,
+            title: "Copy your connection key",
+            body: "Your connection key is shown below. Keep it secret — treat it like a password.",
+          },
+          {
+            num: 2,
+            title: "Choose your programming language",
+            body: "Pick the code snippet below that matches how your AI tool is built, or share this page with your developer.",
+          },
+          {
+            num: 3,
+            title: "Add the code to your AI tool",
+            body: 'Paste the snippet into your AI tool\'s code. Replace "sk-REPLACE_WITH_FULL_KEY" with your actual key from the Settings page.',
+          },
+          {
+            num: 4,
+            title: "Send a test message",
+            body: "Try sending a message through your AI tool. If it's working, it will appear in your Activity History within a few seconds.",
+          },
+        ].map((step) => (
+          <div key={step.num} className="flex gap-4">
+            <div className="w-7 h-7 rounded-full bg-brand-green/10 border border-brand-green/30 text-brand-green text-sm font-bold flex items-center justify-center shrink-0">
+              {step.num}
+            </div>
+            <div>
+              <p className="text-sm font-medium">{step.title}</p>
+              <p className="text-xs text-text-muted mt-0.5">{step.body}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="rounded-2xl border border-brand-green/30 bg-brand-green/10 px-4 py-3 inline-flex items-center gap-3">
@@ -160,15 +195,15 @@ for (let attempt = 0; attempt < 5; attempt += 1) {
         </p>
       </div>
 
-      <SnippetCard title="cURL" code={curlSnippet} testId="snippet-curl" onCopy={handleCopy} />
+      <SnippetCard title="cURL (for testing in terminal)" code={curlSnippet} testId="snippet-curl" onCopy={handleCopy} />
       <SnippetCard
-        title="Python (requests)"
+        title="Python"
         code={pythonSnippet}
         testId="snippet-python"
         onCopy={handleCopy}
       />
       <SnippetCard
-        title="Node.js (fetch)"
+        title="Node.js / JavaScript"
         code={nodeSnippet}
         testId="snippet-node"
         onCopy={handleCopy}

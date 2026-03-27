@@ -1,5 +1,6 @@
 """FastAPI dependency helpers for tenant authentication and DB access."""
 
+import hmac
 from uuid import UUID
 
 import bcrypt
@@ -12,10 +13,13 @@ from starlette.concurrency import run_in_threadpool
 import time
 
 from app.config import settings
+from app.core.redis_client import get_redis
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.services.api_key_cache import api_key_verify_cache
 from app.services.perf_trace import emit_timing, should_trace
+
+_JWT_BLOCKLIST_PREFIX = "jwt_blocklist:"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -43,7 +47,7 @@ async def _verify_api_key(raw_api_key: str, persisted_value: str) -> bool:
             persisted_value.encode("utf-8"),
         )
     else:
-        valid = raw_api_key == persisted_value
+        valid = hmac.compare_digest(raw_api_key, persisted_value)
 
     api_key_verify_cache.set(raw_api_key, persisted_value, valid)
 
@@ -84,6 +88,28 @@ async def get_current_tenant(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         ) from exc
+
+    # Check JWT blocklist (populated by logout endpoint).
+    # Fail-closed: if Redis is unavailable, return 503 rather than silently
+    # accepting a potentially revoked token.
+    jti = payload.get("jti")
+    if jti:
+        try:
+            redis = await get_redis()
+            if await redis.exists(f"{_JWT_BLOCKLIST_PREFIX}{jti}"):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token has been revoked",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            import structlog as _log
+            _log.get_logger().error("jwt_blocklist_check_failed", jti=jti)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service temporarily unavailable",
+            )
 
     result = await db.execute(
         select(Tenant).where(Tenant.id == tenant_id, Tenant.is_active.is_(True))
@@ -131,6 +157,9 @@ async def get_tenant_by_api_key(
     persisted_api_key = tenant.api_key  # type: ignore[assignment]
     is_valid = await _verify_api_key(x_api_key, persisted_api_key)
     if not is_valid:
+        import structlog as _structlog
+        masked = x_api_key[:4] + "..."
+        _structlog.get_logger().warning("auth.api_key_invalid", key_prefix=masked)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",

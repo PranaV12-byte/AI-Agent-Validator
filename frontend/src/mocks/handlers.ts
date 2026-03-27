@@ -1,4 +1,5 @@
 import { http, HttpResponse } from "msw"
+import { MOCK_JWT } from "../test/utils/renderWithProviders"
 
 const dashboardStatsResponse = {
   total_requests: 120,
@@ -99,7 +100,7 @@ let policyConfigState = {
 
 const signupHandler = http.post("*/api/v1/auth/signup", () => {
   return HttpResponse.json(
-    { access_token: "mock-jwt", token_type: "bearer", api_key: "sk-mock" },
+    { access_token: MOCK_JWT, token_type: "bearer", api_key: "sk-mock", refresh_token: "mock-refresh-token" },
     { status: 201 },
   )
 })
@@ -108,10 +109,42 @@ const loginHandler = http.post("*/api/v1/auth/login", async ({ request }) => {
   const body = (await request.json()) as { email?: string; password?: string }
 
   if (body.email && body.password) {
-    return HttpResponse.json({ access_token: "mock-jwt", token_type: "bearer" })
+    return HttpResponse.json({ access_token: MOCK_JWT, token_type: "bearer", refresh_token: "mock-refresh-token" })
   }
 
   return HttpResponse.json({ detail: "Invalid email or password" }, { status: 401 })
+})
+
+const refreshHandler = http.post("*/api/v1/auth/refresh", () => {
+  return HttpResponse.json({
+    access_token: MOCK_JWT,
+    token_type: "bearer",
+    refresh_token: "mock-refresh-token-rotated",
+  })
+})
+
+const logoutHandler = http.post("*/api/v1/auth/logout", () => {
+  return HttpResponse.json({ message: "Logged out." })
+})
+
+const forgotPasswordHandler = http.post("*/api/v1/auth/forgot-password", async ({ request }) => {
+  const body = (await request.json()) as { email?: string }
+  const message = "If that email is registered you will receive a password-reset link shortly."
+  if (body.email === "mock@example.com") {
+    return HttpResponse.json({
+      message,
+      reset_url: "http://localhost:5173/reset-password?token=mock-reset-token",
+    })
+  }
+  return HttpResponse.json({ message })
+})
+
+const resetPasswordHandler = http.post("*/api/v1/auth/reset-password", async ({ request }) => {
+  const body = (await request.json()) as { token?: string; new_password?: string }
+  if (body.token === "mock-reset-token") {
+    return HttpResponse.json({ message: "Password updated successfully." })
+  }
+  return HttpResponse.json({ detail: "Invalid or expired reset token." }, { status: 400 })
 })
 
 const profileHandler = http.get("*/api/v1/auth/me", () => {
@@ -133,13 +166,22 @@ const auditHandler = http.get("*/api/v1/audit/", ({ request }) => {
   const limit = Number(url.searchParams.get("limit") ?? 50)
   const offset = Number(url.searchParams.get("offset") ?? 0)
   const action = url.searchParams.get("action")
+  const startDate = url.searchParams.get("start_date")
+  const endDate = url.searchParams.get("end_date")
 
   let rows = auditResponse.logs
   if (action) {
     rows = rows.filter((row) => row.action === action)
   }
+  if (startDate) {
+    rows = rows.filter((row) => new Date(row.created_at) >= new Date(`${startDate}T00:00:00`))
+  }
+  if (endDate) {
+    rows = rows.filter((row) => new Date(row.created_at) <= new Date(`${endDate}T23:59:59`))
+  }
 
-  return HttpResponse.json(rows.slice(offset, offset + limit))
+  const sliced = rows.slice(offset, offset + limit)
+  return HttpResponse.json({ logs: sliced, total: rows.length, page: Math.floor(offset / limit) + 1, page_size: limit })
 })
 
 const policiesHandler = http.get("*/api/v1/policies/", () => {
@@ -164,6 +206,10 @@ const policyConfigPutHandler = http.put("*/api/v1/policies/config", async ({ req
 export const handlers = [
   signupHandler,
   loginHandler,
+  refreshHandler,
+  logoutHandler,
+  forgotPasswordHandler,
+  resetPasswordHandler,
   profileHandler,
   dashboardStatsHandler,
   auditHandler,
@@ -175,6 +221,10 @@ export const handlers = [
 export const mockHandlers = {
   signup: signupHandler,
   login: loginHandler,
+  refresh: refreshHandler,
+  logout: logoutHandler,
+  forgotPassword: forgotPasswordHandler,
+  resetPassword: resetPasswordHandler,
   profile: profileHandler,
   dashboardStats: dashboardStatsHandler,
   audit: auditHandler,

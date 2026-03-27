@@ -11,14 +11,14 @@ describe("PolicyPage integration", () => {
     render(<PolicyPage />)
 
     await waitFor(() => {
-      expect(screen.getByText("Deployment v1.0")).toBeInTheDocument()
+      expect(screen.getByText("Last updated: version 1.0")).toBeInTheDocument()
     })
 
-    await user.click(screen.getByLabelText("Detect Prompt Injection"))
+    await user.click(screen.getByLabelText("Block AI manipulation attempts"))
     await user.click(screen.getByTestId("deploy-changes-button"))
 
     await waitFor(() => {
-      expect(screen.getByText("Deployment v2.0")).toBeInTheDocument()
+      expect(screen.getByText("Last updated: version 2.0")).toBeInTheDocument()
     })
   })
 })

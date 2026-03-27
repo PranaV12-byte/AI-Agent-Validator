@@ -79,8 +79,24 @@ async def update_safety_config(
         raise HTTPException(status_code=404, detail="Safety config not found")
 
     update_data = body.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(config, key, value)
+    if "global_block_enabled" in update_data:
+        config.global_block_enabled = update_data["global_block_enabled"]
+    if "injection_protection" in update_data:
+        config.injection_protection = update_data["injection_protection"]
+    if "injection_sensitivity" in update_data:
+        config.injection_sensitivity = update_data["injection_sensitivity"]
+    if "pii_redaction" in update_data:
+        config.pii_redaction = update_data["pii_redaction"]
+    if "pii_types" in update_data:
+        config.pii_types = update_data["pii_types"]
+    if "policy_enforcement" in update_data:
+        config.policy_enforcement = update_data["policy_enforcement"]
+    if "fail_mode" in update_data:
+        config.fail_mode = update_data["fail_mode"]
+    if "fallback_message" in update_data:
+        config.fallback_message = update_data["fallback_message"]
+    if "log_retention_days" in update_data:
+        config.log_retention_days = update_data["log_retention_days"]
 
     await db.commit()
     await db.refresh(config)

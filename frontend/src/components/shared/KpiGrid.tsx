@@ -40,9 +40,9 @@ function buildKpis(stats: DashboardStats | null): KpiItem[] {
 
   return [
     {
-      label: "Requests Today",
+      label: "Messages Checked",
       value: values.total_requests.toLocaleString(),
-      trend: `${blockRate.toFixed(1)}% block rate`,
+      trend: `${blockRate.toFixed(1)}% flagged`,
       trendTone: "green",
       iconTone: "bg-brand-green/10 text-brand-green",
       Icon: ShieldCheck,
@@ -64,9 +64,12 @@ function buildKpis(stats: DashboardStats | null): KpiItem[] {
       Icon: CheckCircle2,
     },
     {
-      label: "Avg Latency",
-      value: `${Math.round(values.avg_latency_ms)}ms`,
-      trend: "Last 7 days",
+      label: "Check Speed",
+      value:
+        values.avg_latency_ms < 100
+          ? "< 0.1 sec"
+          : `${(values.avg_latency_ms / 1000).toFixed(2)} sec`,
+      trend: "Avg per message",
       trendTone: "muted",
       iconTone: "bg-sky-500/10 text-sky-500",
       Icon: Zap,

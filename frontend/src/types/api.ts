@@ -2,6 +2,7 @@ export type AuthResponse = {
   access_token: string
   token_type: string
   api_key?: string | null
+  refresh_token?: string | null
 }
 
 export type TenantProfile = {
@@ -15,6 +16,11 @@ export type TenantProfile = {
 export type RegenerateApiKeyResponse = {
   api_key: string
   api_key_prefix: string
+}
+
+export type ForgotPasswordResponse = {
+  message: string
+  reset_url?: string | null
 }
 
 export type DashboardStats = {

@@ -14,16 +14,13 @@ from app.config import settings
 
 logger = structlog.get_logger()
 
-ALGOD_ADDRESS = "https://testnet-api.4160.nodely.dev"
-ALGOD_TOKEN = ""
-
 METHOD_LOG_VIOLATION = b"log_violation"
 METHOD_LOG_APPROVAL = b"log_approval"
 METHOD_REGISTER_POLICY = b"register_policy"
 
 
 def _get_client() -> algod.AlgodClient:
-    return algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
+    return algod.AlgodClient(settings.algorand_api_token, settings.algorand_node_url)
 
 
 def _get_sender_info() -> tuple[str, str]:

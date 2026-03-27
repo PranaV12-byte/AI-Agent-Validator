@@ -11,8 +11,17 @@ type PolicyListProps = {
   onToggle: (policy: Policy) => void
 }
 
+const RULE_TYPE_LABELS: Record<string, string> = {
+  pii_redaction: "Hide Personal Info",
+  prompt_injection: "Block Manipulation",
+  keyword: "Word Match",
+  regex_match: "Pattern Match",
+  llm_eval: "AI Content Check",
+  semantic: "Meaning Match",
+}
+
 function formatRuleType(ruleType: string): string {
-  return ruleType.replaceAll("_", " ")
+  return RULE_TYPE_LABELS[ruleType] ?? ruleType.replaceAll("_", " ")
 }
 
 function PolicyList({
@@ -36,15 +45,15 @@ function PolicyList({
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-1">Policies</h1>
-          <p className="text-text-muted">Define and deploy guardrail rules.</p>
+          <h1 className="text-3xl font-bold mb-1">Protection Rules</h1>
+          <p className="text-text-muted">Set up rules to keep your AI safe for your customers.</p>
         </div>
         <button
           type="button"
           onClick={onCreate}
           className="px-4 py-2 rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green hover:bg-brand-green/20"
         >
-          New Policy
+          Add a Rule
         </button>
       </div>
 
@@ -61,16 +70,16 @@ function PolicyList({
             ? (
               <div className="md:col-span-2 xl:col-span-3 bg-card-bg border border-border-color rounded-2xl p-10 text-center">
                 <ShieldAlert className="w-10 h-10 text-text-muted mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No policies yet</h3>
+                <h3 className="text-lg font-semibold mb-2">No rules set up yet</h3>
                 <p className="text-text-muted mb-5">
-                  Create your first guardrail policy to protect AI traffic.
+                  Add your first rule to start protecting your AI assistant from harmful or inappropriate messages.
                 </p>
                 <button
                   type="button"
                   onClick={onCreate}
                   className="px-4 py-2 rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green hover:bg-brand-green/20"
                 >
-                  Create Policy
+                  Add Your First Rule
                 </button>
               </div>
               )

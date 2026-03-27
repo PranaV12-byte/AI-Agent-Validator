@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { renderWithProviders } from "../../test/utils/renderWithProviders"
+import { MOCK_JWT, renderWithProviders } from "../../test/utils/renderWithProviders"
 import IntegrationPage from "./IntegrationPage"
 
 describe("IntegrationPage", () => {
@@ -11,7 +11,7 @@ describe("IntegrationPage", () => {
   })
 
   it("hydrates API key prefix from auth profile", async () => {
-    localStorage.setItem("safebot.auth.session", JSON.stringify({ accessToken: "mock-jwt" }))
+    localStorage.setItem("safebot.auth.session", JSON.stringify({ accessToken: MOCK_JWT }))
 
     renderWithProviders(<IntegrationPage />)
 
