@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import SettingsPage from "./SettingsPage"
 import { useAuth } from "../../hooks/useAuth"
-import { regenerateApiKeyRequest } from "../../services/authService"
+import { changePasswordRequest, regenerateApiKeyRequest } from "../../services/authService"
 import { fetchSafetyConfig, updateSafetyConfig } from "../../services/dashboardService"
 
 vi.mock("../../hooks/useAuth", () => ({
@@ -13,6 +13,7 @@ vi.mock("../../hooks/useAuth", () => ({
 
 vi.mock("../../services/authService", () => ({
   regenerateApiKeyRequest: vi.fn(),
+  changePasswordRequest: vi.fn(),
 }))
 
 vi.mock("../../services/dashboardService", () => ({
@@ -130,6 +131,32 @@ describe("SettingsPage", () => {
     fireEvent.click(saveButton)
 
     expect(await screen.findByText("Settings saved")).toBeInTheDocument()
+  })
+
+  it("change password: submit calls changePasswordRequest and shows success toast", async () => {
+    vi.mocked(changePasswordRequest).mockResolvedValue(undefined)
+    render(<><Toaster /><SettingsPage /></>)
+
+    await waitFor(() => expect(fetchSafetyConfig).toHaveBeenCalled())
+
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "OldPass123!" } })
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "NewPass456!" } })
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "NewPass456!" } })
+    fireEvent.click(screen.getByRole("button", { name: /Update password/i }))
+
+    expect(await screen.findByText("Password updated")).toBeInTheDocument()
+    expect(changePasswordRequest).toHaveBeenCalledWith("OldPass123!", "NewPass456!")
+  })
+
+  it("change password: mismatch shows inline error", async () => {
+    render(<SettingsPage />)
+
+    await waitFor(() => expect(fetchSafetyConfig).toHaveBeenCalled())
+
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "NewPass456!" } })
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "Different123!" } })
+
+    expect(screen.getByText("Passwords do not match.")).toBeInTheDocument()
   })
 
   it("requires two clicks to rotate the API key (confirmation step)", async () => {

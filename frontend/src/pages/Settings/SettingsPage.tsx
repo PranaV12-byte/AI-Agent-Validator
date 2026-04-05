@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { toast } from "sonner"
 
 import { useAuth } from "../../hooks/useAuth"
-import { regenerateApiKeyRequest } from "../../services/authService"
+import { changePasswordRequest, regenerateApiKeyRequest } from "../../services/authService"
 import { fetchSafetyConfig, updateSafetyConfig } from "../../services/dashboardService"
 import type { SafetyConfig } from "../../types/api"
 import DeveloperSettingsCard from "./components/DeveloperSettingsCard"
@@ -16,6 +16,109 @@ function toForm(config: SafetyConfig): SecurityPostureForm {
     fallback_message: config.fallback_message,
     log_retention_days: config.log_retention_days,
   }
+}
+
+function ChangePasswordCard() {
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const mismatch = newPassword.length > 0 && confirmPassword.length > 0 && newPassword !== confirmPassword
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+
+    if (newPassword.length < 8) {
+      setError("Password must be at least 8 characters.")
+      return
+    }
+    if (!/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setError("Password must contain at least one letter and one number.")
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match.")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await changePasswordRequest(currentPassword, newPassword)
+      setCurrentPassword("")
+      setNewPassword("")
+      setConfirmPassword("")
+      toast.success("Password updated")
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(typeof detail === "string" ? detail : "Could not update password. Please try again.")
+      toast.error("Could not update password")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <section className="border border-border-color rounded-xl p-5 bg-dashboard-bg/40 space-y-4">
+      <h2 className="text-lg font-semibold">Change Password</h2>
+      <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+        <div>
+          <label htmlFor="current-password" className="block text-sm text-text-muted mb-1">
+            Current password
+          </label>
+          <input
+            id="current-password"
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            required
+            className="w-full bg-dashboard-bg border border-border-color rounded-lg px-4 py-2.5 text-sm focus:ring-1 focus:ring-brand-green focus:outline-none"
+          />
+        </div>
+        <div>
+          <label htmlFor="new-password" className="block text-sm text-text-muted mb-1">
+            New password
+          </label>
+          <input
+            id="new-password"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            required
+            className="w-full bg-dashboard-bg border border-border-color rounded-lg px-4 py-2.5 text-sm focus:ring-1 focus:ring-brand-green focus:outline-none"
+          />
+        </div>
+        <div>
+          <label htmlFor="confirm-new-password" className="block text-sm text-text-muted mb-1">
+            Confirm new password
+          </label>
+          <input
+            id="confirm-new-password"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+            className="w-full bg-dashboard-bg border border-border-color rounded-lg px-4 py-2.5 text-sm focus:ring-1 focus:ring-brand-green focus:outline-none"
+          />
+          {mismatch ? (
+            <p className="text-sm text-brand-red mt-1">Passwords do not match.</p>
+          ) : null}
+        </div>
+        {error ? (
+          <p className="text-sm text-brand-red">{error}</p>
+        ) : null}
+        <button
+          type="submit"
+          disabled={isSubmitting || mismatch}
+          className="rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green px-4 py-2 font-medium hover:bg-brand-green/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isSubmitting ? "Updating..." : "Update password"}
+        </button>
+      </form>
+    </section>
+  )
 }
 
 function SettingsPage() {
@@ -152,6 +255,8 @@ function SettingsPage() {
         onCopyPrefix={handleCopyPrefix}
         onCopyNewKey={handleCopyKey}
       />
+
+      <ChangePasswordCard />
 
       <SaveSettingsButton
         disabled={!hasUnsavedChanges}

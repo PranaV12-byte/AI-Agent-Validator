@@ -51,10 +51,34 @@ export async function confirmPasswordReset(
 export async function refreshTokenRequest(refreshToken: string): Promise<AuthResponse> {
   const response = await apiClient.post<AuthResponse>("/auth/refresh", {
     refresh_token: refreshToken,
-  })
+  }, { _skipProactiveRefresh: true } as object)
   return response.data
 }
 
 export async function logoutRequest(refreshToken: string | null = null): Promise<void> {
-  await apiClient.post("/auth/logout", refreshToken ? { refresh_token: refreshToken } : undefined)
+  await apiClient.post(
+    "/auth/logout",
+    refreshToken ? { refresh_token: refreshToken } : undefined,
+    { _skipProactiveRefresh: true } as object,
+  )
+}
+
+export async function verifyEmail(token: string): Promise<{ message: string }> {
+  const response = await apiClient.post<{ message: string }>("/auth/verify-email", { token })
+  return response.data
+}
+
+export async function resendVerification(email: string): Promise<{ message: string }> {
+  const response = await apiClient.post<{ message: string }>("/auth/resend-verification", { email })
+  return response.data
+}
+
+export async function changePasswordRequest(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await apiClient.post("/auth/change-password", {
+    current_password: currentPassword,
+    new_password: newPassword,
+  })
 }

@@ -23,16 +23,20 @@ from app.models.safety_config import SafetyConfig
 from app.models.tenant import Tenant
 from app.schemas.auth import (
     AuthResponse,
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     LoginRequest,
     LogoutRequest,
     RefreshTokenRequest,
     RegenerateApiKeyResponse,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     SignupRequest,
     TenantProfileResponse,
+    VerifyEmailRequest,
 )
+from app.services.email_service import send_password_reset_email, send_verification_email
 
 logger = structlog.get_logger()
 
@@ -173,6 +177,10 @@ async def signup(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
+    # In development and test environments, auto-verify email so the developer
+    # can sign in immediately without needing an SMTP server.
+    auto_verified = settings.environment in ("development", "test")
+
     raw_api_key = _generate_api_key()
     tenant = Tenant(
         company_name=body.company_name,
@@ -182,6 +190,7 @@ async def signup(
         api_key_prefix=raw_api_key[:8],
         active_policy_version=0,
         is_active=True,
+        email_verified=auto_verified,
     )
     db.add(tenant)
     await db.flush()
@@ -190,10 +199,44 @@ async def signup(
     await db.commit()
     await db.refresh(tenant)
 
-    logger.info("auth.signup", tenant_id=str(tenant.id), email=body.email)
+    logger.info("auth.signup", tenant_id=str(tenant.id), email=body.email, email_verified=auto_verified)
+
+    verification_url_in_response: str | None = None
+    if not auto_verified:
+        verify_token = secrets.token_urlsafe(32)
+        redis = await get_redis()
+        await redis.setex(
+            f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
+            settings.email_verification_token_ttl_seconds,
+            str(tenant.id),
+        )
+        verify_url = f"{settings.frontend_url}/verify-email?token={verify_token}"
+        logger.info("email_verification_token_created", email=body.email, verify_url=verify_url)
+        await send_verification_email(body.email, verify_url)
+        # Never expose the token URL in production responses
+        verification_url_in_response = None
+    else:
+        # Expose in dev/test so devs can skip the email step
+        verify_token = secrets.token_urlsafe(32)
+        redis = await get_redis()
+        await redis.setex(
+            f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
+            settings.email_verification_token_ttl_seconds,
+            str(tenant.id),
+        )
+        verify_url = f"{settings.frontend_url}/verify-email?token={verify_token}"
+        logger.info("email_verification_token_created", email=body.email, verify_url=verify_url)
+        verification_url_in_response = verify_url
+
     token = _create_access_token(str(tenant.id))
     refresh_token, _ = await _create_refresh_token(str(tenant.id))
-    return AuthResponse(access_token=token, api_key=raw_api_key, refresh_token=refresh_token)
+    return AuthResponse(
+        access_token=token,
+        api_key=raw_api_key,
+        refresh_token=refresh_token,
+        email_verified=auto_verified,
+        verification_url=verification_url_in_response,
+    )
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -214,6 +257,13 @@ async def login(
     if not cast(bool, tenant.is_active):
         logger.warning("auth.login_inactive", email=body.email)
         raise HTTPException(status_code=403, detail="Tenant account is inactive")
+
+    if not cast(bool, tenant.email_verified):
+        logger.warning("auth.login_unverified_email", email=body.email)
+        raise HTTPException(
+            status_code=403,
+            detail="Email address not verified. Please check your inbox or request a new verification link.",
+        )
 
     logger.info("auth.login_success", tenant_id=str(tenant.id))
     token = _create_access_token(str(tenant.id))
@@ -311,7 +361,9 @@ async def get_me(tenant: Tenant = Depends(get_current_tenant)) -> TenantProfileR
 
 
 @router.post("/regenerate-key", response_model=RegenerateApiKeyResponse)
+@limiter.limit("3/hour")
 async def regenerate_key(
+    request: Request,
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> RegenerateApiKeyResponse:
@@ -331,6 +383,7 @@ async def regenerate_key(
 
 
 _RESET_KEY_PREFIX = "password_reset:"
+_EMAIL_VERIFY_PREFIX = "email_verification:"
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)
@@ -368,6 +421,10 @@ async def forgot_password(
     reset_url = f"{settings.frontend_url}/reset-password?token={token}"
     logger.info("password_reset_requested", email=body.email, reset_url=reset_url)
 
+    # Always attempt to send the email — send_password_reset_email is a no-op
+    # when SMTP is not configured (logs a warning instead).
+    await send_password_reset_email(body.email, reset_url)
+
     reset_url_in_response = reset_url if settings.environment in ("development", "test") else None
     return ForgotPasswordResponse(message=generic_message, reset_url=reset_url_in_response)
 
@@ -382,7 +439,8 @@ async def reset_password(
     """Consume a password-reset token and update the tenant's password."""
     redis = await get_redis()
     redis_key = f"{_RESET_KEY_PREFIX}{body.token}"
-    tenant_id = await redis.get(redis_key)
+    # Atomic GET+DELETE — prevents replay even under concurrent requests
+    tenant_id = await redis.getdel(redis_key)
 
     if tenant_id is None:
         raise HTTPException(
@@ -398,9 +456,6 @@ async def reset_password(
             detail="Invalid or expired reset token.",
         )
 
-    # Consume token immediately (single-use).
-    await redis.delete(redis_key)
-
     tenant.password_hash = _hash_password(body.new_password)
     await db.commit()
 
@@ -409,4 +464,95 @@ async def reset_password(
     await _revoke_all_sessions_for_tenant(str(tenant_id))
 
     logger.info("password_reset_completed", tenant_id=tenant_id)
+    return {"message": "Password updated successfully."}
+
+
+@router.post("/verify-email", status_code=status.HTTP_200_OK)
+@limiter.limit("10/minute")
+async def verify_email(
+    request: Request,
+    body: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Consume an email verification token and mark the tenant's email as verified."""
+    redis = await get_redis()
+    tenant_id = await redis.getdel(f"{_EMAIL_VERIFY_PREFIX}{body.token}")
+
+    if tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification link.",
+        )
+
+    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = result.scalar_one_or_none()
+    if tenant is None or not cast(bool, tenant.is_active):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification link.",
+        )
+
+    if cast(bool, tenant.email_verified):
+        # Already verified — idempotent success
+        return {"message": "Email already verified."}
+
+    tenant.email_verified = True
+    await db.commit()
+
+    logger.info("email_verified", tenant_id=tenant_id)
+    return {"message": "Email verified successfully. You can now sign in."}
+
+
+@router.post("/resend-verification", status_code=status.HTTP_200_OK)
+@limiter.limit("3/minute")
+async def resend_verification(
+    request: Request,
+    body: ResendVerificationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Re-send the email verification link.
+
+    Always returns 200 regardless of whether the email is registered or already
+    verified, to prevent account enumeration.
+    """
+    generic_message = "If that email is registered and unverified, a new link has been sent."
+
+    result = await db.execute(select(Tenant).where(Tenant.email == body.email))
+    tenant = result.scalar_one_or_none()
+
+    if tenant is None or cast(bool, tenant.email_verified):
+        return {"message": generic_message}
+
+    verify_token = secrets.token_urlsafe(32)
+    redis = await get_redis()
+    await redis.setex(
+        f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
+        settings.email_verification_token_ttl_seconds,
+        str(tenant.id),
+    )
+    verify_url = f"{settings.frontend_url}/verify-email?token={verify_token}"
+    logger.info("email_verification_resent", email=body.email, verify_url=verify_url)
+    await send_verification_email(body.email, verify_url)
+
+    return {"message": generic_message}
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+@limiter.limit("5/hour")
+async def change_password(
+    request: Request,
+    body: ChangePasswordRequest,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Change the current tenant's password (requires existing valid password)."""
+    if not _verify_password(body.current_password, cast(str, tenant.password_hash)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+    tenant.password_hash = _hash_password(body.new_password)
+    await db.commit()
+    await _revoke_all_sessions_for_tenant(str(tenant.id))
+    logger.info("auth.password_changed", tenant_id=str(tenant.id))
     return {"message": "Password updated successfully."}

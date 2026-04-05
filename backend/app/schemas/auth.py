@@ -40,6 +40,10 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     api_key: str | None = None
     refresh_token: str | None = None
+    # Populated on signup only — tells the client whether to show "check your email"
+    email_verified: bool | None = None
+    # Populated in development/test so developers can action the link immediately
+    verification_url: str | None = None
 
 
 class RefreshTokenRequest(BaseModel):
@@ -89,6 +93,34 @@ class ResetPasswordRequest(BaseModel):
     """Request body for confirming a password reset."""
 
     token: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_complexity(cls, value: str) -> str:
+        if not _HAS_LETTER.search(value):
+            raise ValueError("Password must contain at least one letter.")
+        if not _HAS_DIGIT.search(value):
+            raise ValueError("Password must contain at least one number.")
+        return value
+
+
+class VerifyEmailRequest(BaseModel):
+    """Request body for consuming an email verification token."""
+
+    token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    """Request body for re-sending the verification email."""
+
+    email: EmailStr
+
+
+class ChangePasswordRequest(BaseModel):
+    """Request body for changing password when already authenticated."""
+
+    current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=8, max_length=128)
 
     @field_validator("new_password")
