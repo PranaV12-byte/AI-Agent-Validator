@@ -1,7 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { http, HttpResponse } from "msw"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
+
+afterEach(() => cleanup())
 
 import { server } from "../../mocks/server"
 import DashboardPage from "./DashboardPage"
@@ -39,6 +41,52 @@ describe("Dashboard integration", () => {
 
     expect(await screen.findByText("Welcome to Safebot — let's get you set up")).toBeInTheDocument()
     expect(screen.getByText("Follow these steps to protect your AI assistant.")).toBeInTheDocument()
+  })
+
+  it("marks 'Add your first protection rule' done when policies exist", async () => {
+    server.use(
+      http.get("*/api/v1/dashboard/stats", () =>
+        HttpResponse.json({ total_requests: 0, blocked_requests: 0, avg_latency_ms: 0 })
+      ),
+      http.get("*/api/v1/audit/", () =>
+        HttpResponse.json({ logs: [], total: 0, page: 1, page_size: 20 })
+      ),
+      http.get("*/api/v1/policies/", () =>
+        HttpResponse.json({
+          policies: [{ id: "p1", name: "Test", rule_type: "keyword", is_enabled: true }],
+          total: 1,
+        })
+      ),
+    )
+
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>)
+
+    // Checklist visible because total_requests is still 0
+    const ruleStep = await screen.findByText("Add your first protection rule")
+    expect(ruleStep).toHaveClass("line-through")
+  })
+
+  it("hides onboarding checklist when all steps complete", async () => {
+    server.use(
+      http.get("*/api/v1/dashboard/stats", () =>
+        HttpResponse.json({ total_requests: 5, blocked_requests: 1, avg_latency_ms: 45 })
+      ),
+      http.get("*/api/v1/audit/", () =>
+        HttpResponse.json({ logs: [], total: 5, page: 1, page_size: 20 })
+      ),
+      http.get("*/api/v1/policies/", () =>
+        HttpResponse.json({
+          policies: [{ id: "p1", name: "Test", rule_type: "keyword", is_enabled: true }],
+          total: 1,
+        })
+      ),
+    )
+
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>)
+
+    await waitFor(() => {
+      expect(screen.queryByText("Welcome to Safebot — let's get you set up")).not.toBeInTheDocument()
+    })
   })
 
   it("renders metrics error state when stats API fails", async () => {

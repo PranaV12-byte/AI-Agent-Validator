@@ -8,37 +8,18 @@ import PageHeader from "../../components/shared/PageHeader"
 import UsageTrendChart from "../../components/shared/UsageTrendChart"
 import { fetchAuditLogs } from "../../services/auditService"
 import { fetchDashboardStats } from "../../services/dashboardService"
+import { fetchPolicies } from "../../services/policyService"
 import type { AuditLog, DashboardStats } from "../../types/api"
 
-function OnboardingChecklist() {
-  const navigate = useNavigate()
+type ChecklistStep = {
+  label: string
+  done: boolean
+  action: (() => void) | null
+  actionLabel?: string
+  hint?: string
+}
 
-  const steps = [
-    {
-      label: "Create your account",
-      done: true,
-      action: null,
-    },
-    {
-      label: "Add your first protection rule",
-      done: false,
-      action: () => navigate("/policies"),
-      actionLabel: "Go to Protection Rules",
-    },
-    {
-      label: "Connect your AI tool",
-      done: false,
-      action: () => navigate("/integration"),
-      actionLabel: "View Setup Guide",
-    },
-    {
-      label: "Send a test message",
-      done: false,
-      action: null,
-      hint: "Complete the steps above first",
-    },
-  ]
-
+function OnboardingChecklist({ steps }: { steps: ChecklistStep[] }) {
   return (
     <section className="bg-card-bg border border-border-color rounded-2xl p-8 mb-8">
       <h2 className="text-xl font-bold mb-1">Welcome to Safebot — let's get you set up</h2>
@@ -73,16 +54,16 @@ function OnboardingChecklist() {
 }
 
 function DashboardPage() {
+  const navigate = useNavigate()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [logs, setLogs] = useState<AuditLog[]>([])
+  const [policyCount, setPolicyCount] = useState<number | null>(null)
 
   const [isStatsLoading, setIsStatsLoading] = useState(true)
   const [isLogsLoading, setIsLogsLoading] = useState(true)
 
   const [statsError, setStatsError] = useState<string | null>(null)
   const [logsError, setLogsError] = useState<string | null>(null)
-
-  const [showEmptyState, setShowEmptyState] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -93,53 +74,47 @@ function DashboardPage() {
       setStatsError(null)
       setLogsError(null)
 
-      try {
-        const dashboard = await fetchDashboardStats()
-        if (mounted) {
-          setStats({
-            total_requests: dashboard.total_requests,
-            blocked_requests: dashboard.blocked_requests,
-            avg_latency_ms: dashboard.avg_latency_ms,
-          })
-          setShowEmptyState(dashboard.total_requests === 0)
-        }
-      } catch {
-        if (mounted) {
-          setStatsError("Unable to fetch security metrics at this time.")
-        }
-      } finally {
-        if (mounted) {
-          setIsStatsLoading(false)
-        }
-      }
+      const [dashboardResult, auditResult, policiesResult] = await Promise.allSettled([
+        fetchDashboardStats(),
+        fetchAuditLogs({ page: 1, page_size: 20 }),
+        fetchPolicies(),
+      ])
 
-      try {
-        const audit = await fetchAuditLogs({ page: 1, page_size: 20 })
-        if (mounted) {
-          setLogs(audit.logs)
-        }
-      } catch {
-        if (mounted) {
-          setLogsError("Unable to load recent activity right now.")
-        }
-      } finally {
-        if (mounted) {
-          setIsLogsLoading(false)
-        }
+      if (!mounted) return
+
+      if (dashboardResult.status === "fulfilled") {
+        setStats({
+          total_requests: dashboardResult.value.total_requests,
+          blocked_requests: dashboardResult.value.blocked_requests,
+          avg_latency_ms: dashboardResult.value.avg_latency_ms,
+        })
+      } else {
+        setStatsError("Unable to fetch security metrics at this time.")
+      }
+      setIsStatsLoading(false)
+
+      if (auditResult.status === "fulfilled") {
+        setLogs(auditResult.value.logs)
+      } else {
+        setLogsError("Unable to load recent activity right now.")
+      }
+      setIsLogsLoading(false)
+
+      if (policiesResult.status === "fulfilled") {
+        setPolicyCount(policiesResult.value.total)
+      } else {
+        setPolicyCount(0)
       }
     }
 
     void load()
 
-    // Refetch when the tab regains focus so data stays fresh.
     function onVisibilityChange() {
       if (document.visibilityState === "visible" && mounted) {
         void load()
       }
     }
     document.addEventListener("visibilitychange", onVisibilityChange)
-
-    // Poll every 5 minutes as a background refresh.
     const interval = setInterval(() => { if (mounted) void load() }, 5 * 60 * 1000)
 
     return () => {
@@ -149,12 +124,40 @@ function DashboardPage() {
     }
   }, [])
 
+  const hasActivity = (stats?.total_requests ?? 0) > 0
+  const hasPolicy = (policyCount ?? 0) > 0
+
+  const checklistSteps: ChecklistStep[] = [
+    { label: "Create your account", done: true, action: null },
+    {
+      label: "Add your first protection rule",
+      done: hasPolicy,
+      action: hasPolicy ? null : () => navigate("/policies"),
+      actionLabel: "Go to Protection Rules",
+    },
+    {
+      label: "Connect your AI tool",
+      done: hasActivity,
+      action: hasActivity ? null : () => navigate("/integration"),
+      actionLabel: "View Setup Guide",
+    },
+    {
+      label: "Send a test message",
+      done: hasActivity,
+      action: null,
+      hint: hasActivity ? undefined : "Complete the steps above first",
+    },
+  ]
+
+  const allDone = checklistSteps.every((s) => s.done)
+  const showChecklist = !isStatsLoading && !allDone && policyCount !== null
+
   return (
     <>
       <PageHeader />
       <KpiGrid stats={stats} isLoading={isStatsLoading} error={statsError} />
       <UsageTrendChart />
-      {showEmptyState && !isStatsLoading ? <OnboardingChecklist /> : null}
+      {showChecklist ? <OnboardingChecklist steps={checklistSteps} /> : null}
       <ActivityTable logs={logs} isLoading={isLogsLoading} error={logsError} />
     </>
   )
