@@ -20,7 +20,17 @@ function DeveloperSettingsCard({
   onCopyNewKey,
 }: DeveloperSettingsCardProps) {
   const [showKey, setShowKey] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   useEffect(() => { setShowKey(false) }, [newApiKey])
+
+  function handleRotateClick() {
+    setConfirming(true)
+  }
+
+  async function handleConfirmRotate() {
+    setConfirming(false)
+    await onRotate()
+  }
 
   return (
     <section className="border border-border-color rounded-xl p-5 bg-dashboard-bg/40 space-y-4">
@@ -43,14 +53,39 @@ function DeveloperSettingsCard({
         </button>
       </div>
 
-      <button
-        type="button"
-        onClick={() => void onRotate()}
-        disabled={isRotating}
-        className="rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green px-4 py-2 font-medium hover:bg-brand-green/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        {isRotating ? "Rotating..." : "Regenerate API Key"}
-      </button>
+      {confirming ? (
+        <div className="space-y-3">
+          <p className="text-sm text-brand-red">
+            This will break existing integrations. Your old key will stop working immediately.
+          </p>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => void handleConfirmRotate()}
+              disabled={isRotating}
+              className="rounded-lg bg-brand-red/10 border border-brand-red/30 text-brand-red px-4 py-2 font-medium hover:bg-brand-red/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isRotating ? "Rotating..." : "Yes, rotate key"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="rounded-lg border border-border-color text-text-muted px-4 py-2 font-medium hover:text-white hover:bg-white/5 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handleRotateClick}
+          disabled={isRotating}
+          className="rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green px-4 py-2 font-medium hover:bg-brand-green/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isRotating ? "Rotating..." : "Regenerate API Key"}
+        </button>
+      )}
 
       {newApiKey ? (
         <div className="space-y-2">

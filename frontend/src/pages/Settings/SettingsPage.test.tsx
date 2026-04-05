@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { Toaster } from "sonner"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import SettingsPage from "./SettingsPage"
@@ -108,5 +109,67 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByText("Copy Prefix"))
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("abc12345")
+  })
+
+  it("shows success toast after settings are saved", async () => {
+    render(
+      <>
+        <Toaster />
+        <SettingsPage />
+      </>,
+    )
+
+    // Wait for config to load
+    const saveButton = await screen.findByTestId("settings-save-button")
+    expect(saveButton).toBeDisabled()
+
+    // Make a change to enable the save button
+    fireEvent.click(screen.getByLabelText("Block all harmful messages"))
+    expect(saveButton).toBeEnabled()
+
+    fireEvent.click(saveButton)
+
+    expect(await screen.findByText("Settings saved")).toBeInTheDocument()
+  })
+
+  it("requires two clicks to rotate the API key (confirmation step)", async () => {
+    render(<SettingsPage />)
+
+    // First click: should show confirmation, NOT call rotate
+    const rotateBtn = await screen.findByRole("button", { name: /Regenerate API Key/i })
+    fireEvent.click(rotateBtn)
+
+    expect(regenerateApiKeyRequest).not.toHaveBeenCalled()
+    expect(await screen.findByText(/This will break existing integrations/i)).toBeInTheDocument()
+
+    // Cancel returns to default state
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/i }))
+    expect(screen.queryByText(/This will break existing integrations/i)).not.toBeInTheDocument()
+  })
+
+  it("rotates key when user confirms", async () => {
+    render(<SettingsPage />)
+
+    const rotateBtn = await screen.findByRole("button", { name: /Regenerate API Key/i })
+    fireEvent.click(rotateBtn)
+    fireEvent.click(await screen.findByRole("button", { name: /Yes, rotate key/i }))
+
+    await waitFor(() => expect(regenerateApiKeyRequest).toHaveBeenCalledOnce())
+  })
+
+  it("shows error message when save fails", async () => {
+    vi.mocked(updateSafetyConfig).mockRejectedValue(new Error("Server error"))
+
+    render(<SettingsPage />)
+
+    const saveButton = await screen.findByTestId("settings-save-button")
+
+    // Make a change to enable the save button
+    fireEvent.click(screen.getByLabelText("Block all harmful messages"))
+    fireEvent.click(saveButton)
+
+    expect(
+      await screen.findByText("Could not save settings. Please try again."),
+    ).toBeInTheDocument()
   })
 })
