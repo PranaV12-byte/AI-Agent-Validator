@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom"
 
 import type { AuditLog } from "../../types/api"
 import { formatTimeAgo } from "../../utils/format"
@@ -45,6 +46,8 @@ function toIncident(log: AuditLog): Incident {
 }
 
 function ActivityTable({ logs, isLoading, error }: ActivityTableProps) {
+  const navigate = useNavigate()
+
   if (error) {
     return (
       <section className="bg-card-bg border border-border-color rounded-2xl p-6">
@@ -53,7 +56,7 @@ function ActivityTable({ logs, isLoading, error }: ActivityTableProps) {
     )
   }
 
-  const incidents = logs.map(toIncident)
+  const incidents = (logs ?? []).map(toIncident)
 
   if (!isLoading && incidents.length === 0) {
     return (
@@ -69,8 +72,17 @@ function ActivityTable({ logs, isLoading, error }: ActivityTableProps) {
       className="bg-card-bg border border-border-color rounded-2xl overflow-hidden"
       data-purpose="table-container"
     >
-      <div className="p-6 border-b border-border-color">
+      <div className="p-6 border-b border-border-color flex items-center justify-between">
         <h2 className="text-xl font-bold">Recent Activity</h2>
+        {incidents.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => navigate("/audit-log")}
+            className="text-sm text-brand-green hover:underline"
+          >
+            View all activity →
+          </button>
+        ) : null}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left">
