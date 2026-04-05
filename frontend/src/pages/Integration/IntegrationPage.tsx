@@ -1,5 +1,6 @@
 import { Check, Copy, KeyRound } from "lucide-react"
 import { useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
 import { useAuth } from "../../hooks/useAuth"
@@ -67,6 +68,7 @@ async function copyToClipboard(text: string): Promise<void> {
 
 function IntegrationPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1"
 
@@ -186,6 +188,21 @@ for (let attempt = 0; attempt < 5; attempt += 1) {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="bg-card-bg border border-brand-green/20 rounded-2xl p-5 space-y-2">
+        <p className="text-sm font-medium text-brand-green">Don't have your full API key?</p>
+        <p className="text-sm text-text-muted">
+          Your full key was shown once when you signed up. If you don't have it, go to{" "}
+          <strong>Settings → Developer Settings → Regenerate API Key</strong> to create a new one.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate("/settings")}
+          className="text-sm text-brand-green hover:underline"
+        >
+          Go to Settings →
+        </button>
       </div>
 
       <div className="rounded-2xl border border-brand-green/30 bg-brand-green/10 px-4 py-3 inline-flex items-center gap-3">
