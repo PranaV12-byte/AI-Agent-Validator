@@ -133,6 +133,13 @@ describe("SettingsPage", () => {
     expect(await screen.findByText("Settings saved")).toBeInTheDocument()
   })
 
+  it("shows injection protection and fail-mode controls in the security card", async () => {
+    render(<SettingsPage />)
+    await waitFor(() => expect(fetchSafetyConfig).toHaveBeenCalled())
+    expect(screen.getByLabelText(/Block AI manipulation attempts/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/If something goes wrong/i)).toBeInTheDocument()
+  })
+
   it("change password: submit calls changePasswordRequest and shows success toast", async () => {
     vi.mocked(changePasswordRequest).mockResolvedValue(undefined)
     render(<><Toaster /><SettingsPage /></>)

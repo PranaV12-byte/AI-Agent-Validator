@@ -9,7 +9,6 @@ import {
   updatePolicy,
 } from "../../services/policyService"
 import DeleteConfirmationModal from "./components/DeleteConfirmationModal"
-import PolicyPage from "./PolicyPage"
 import PolicyBuilderModal from "./components/PolicyBuilderModal"
 import PolicyList from "./components/PolicyList"
 
@@ -25,7 +24,6 @@ function PoliciesPage() {
 
   const [policyToDelete, setPolicyToDelete] = useState<Policy | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [activeTab, setActiveTab] = useState<"rules" | "config">("rules")
 
   const loadPolicies = useCallback(async () => {
     setIsLoading(true)
@@ -100,36 +98,6 @@ function PoliciesPage() {
 
   return (
     <>
-      <div className="flex items-center gap-2 mb-4">
-        <button
-          type="button"
-          onClick={() => setActiveTab("rules")}
-          className={[
-            "px-3 py-2 rounded-lg border text-sm",
-            activeTab === "rules"
-              ? "border-brand-green/40 text-brand-green bg-brand-green/10"
-              : "border-border-color text-text-muted hover:text-white",
-          ].join(" ")}
-        >
-          My Protection Rules
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("config")}
-          className={[
-            "px-3 py-2 rounded-lg border text-sm",
-            activeTab === "config"
-              ? "border-brand-green/40 text-brand-green bg-brand-green/10"
-              : "border-border-color text-text-muted hover:text-white",
-          ].join(" ")}
-        >
-          Settings
-        </button>
-      </div>
-
-      {activeTab === "config" ? <PolicyPage /> : null}
-
-      {activeTab === "rules" ? (
       <PolicyList
         policies={policies}
         isLoading={isLoading}
@@ -147,27 +115,22 @@ function PoliciesPage() {
         onDelete={(policy) => setPolicyToDelete(policy)}
         onToggle={(policy) => void handleToggle(policy)}
       />
-      ) : null}
 
-      {activeTab === "rules" ? (
-        <PolicyBuilderModal
-          mode={builderMode}
-          policy={selectedPolicy}
-          isOpen={isBuilderOpen}
-          isSaving={isSaving}
-          onClose={() => setIsBuilderOpen(false)}
-          onSave={handleSave}
-        />
-      ) : null}
+      <PolicyBuilderModal
+        mode={builderMode}
+        policy={selectedPolicy}
+        isOpen={isBuilderOpen}
+        isSaving={isSaving}
+        onClose={() => setIsBuilderOpen(false)}
+        onSave={handleSave}
+      />
 
-      {activeTab === "rules" ? (
-        <DeleteConfirmationModal
-          policy={policyToDelete}
-          isDeleting={isDeleting}
-          onCancel={() => setPolicyToDelete(null)}
-          onConfirm={handleDeleteConfirm}
-        />
-      ) : null}
+      <DeleteConfirmationModal
+        policy={policyToDelete}
+        isDeleting={isDeleting}
+        onCancel={() => setPolicyToDelete(null)}
+        onConfirm={handleDeleteConfirm}
+      />
     </>
   )
 }

@@ -1,6 +1,8 @@
 type SecurityPostureForm = {
   global_block_enabled: boolean
+  injection_protection: boolean
   pii_redaction: boolean
+  fail_mode: "open" | "closed"
   fallback_message: string
   log_retention_days: number
 }
@@ -19,24 +21,52 @@ function SecurityPostureCard({ form, onChange, isLoading = false }: SecurityPost
       <label className="flex items-center justify-between">
         <span className="text-sm text-text-muted">Block all harmful messages</span>
         <input
+          aria-label="Block all harmful messages"
           type="checkbox"
           checked={form.global_block_enabled}
           disabled={isLoading}
-          onChange={(event) =>
-            onChange({ ...form, global_block_enabled: event.target.checked })
-          }
+          onChange={(e) => onChange({ ...form, global_block_enabled: e.target.checked })}
+        />
+      </label>
+
+      <label className="flex items-center justify-between">
+        <span className="text-sm text-text-muted">Block AI manipulation attempts</span>
+        <input
+          aria-label="Block AI manipulation attempts"
+          type="checkbox"
+          checked={form.injection_protection}
+          disabled={isLoading}
+          onChange={(e) => onChange({ ...form, injection_protection: e.target.checked })}
         />
       </label>
 
       <label className="flex items-center justify-between">
         <span className="text-sm text-text-muted">Hide personal info in messages</span>
         <input
+          aria-label="Hide personal info in messages"
           type="checkbox"
           checked={form.pii_redaction}
           disabled={isLoading}
-          onChange={(event) => onChange({ ...form, pii_redaction: event.target.checked })}
+          onChange={(e) => onChange({ ...form, pii_redaction: e.target.checked })}
         />
       </label>
+
+      <div>
+        <label htmlFor="fail-mode-settings" className="block text-sm text-text-muted mb-2">
+          If something goes wrong
+        </label>
+        <select
+          id="fail-mode-settings"
+          aria-label="If something goes wrong"
+          value={form.fail_mode}
+          disabled={isLoading}
+          onChange={(e) => onChange({ ...form, fail_mode: e.target.value as "open" | "closed" })}
+          className="bg-dashboard-bg border border-border-color rounded-lg px-3 py-2.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option value="closed">Block the message (safe)</option>
+          <option value="open">Allow the message (risky)</option>
+        </select>
+      </div>
 
       <div>
         <label htmlFor="fallback-message" className="block text-sm text-text-muted mb-2">
@@ -46,7 +76,7 @@ function SecurityPostureCard({ form, onChange, isLoading = false }: SecurityPost
           id="fallback-message"
           value={form.fallback_message}
           disabled={isLoading}
-          onChange={(event) => onChange({ ...form, fallback_message: event.target.value })}
+          onChange={(e) => onChange({ ...form, fallback_message: e.target.value })}
           className="w-full bg-card-bg border border-border-color rounded-lg px-3 py-2.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <p className="text-xs text-text-muted mt-1">This is what your customer sees when a message is stopped.</p>
@@ -62,9 +92,7 @@ function SecurityPostureCard({ form, onChange, isLoading = false }: SecurityPost
           min={1}
           value={form.log_retention_days}
           disabled={isLoading}
-          onChange={(event) =>
-            onChange({ ...form, log_retention_days: Number(event.target.value) || 0 })
-          }
+          onChange={(e) => onChange({ ...form, log_retention_days: Number(e.target.value) || 0 })}
           className="w-full bg-card-bg border border-border-color rounded-lg px-3 py-2.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
         />
       </div>

@@ -12,7 +12,9 @@ import SecurityPostureCard, { type SecurityPostureForm } from "./components/Secu
 function toForm(config: SafetyConfig): SecurityPostureForm {
   return {
     global_block_enabled: config.global_block_enabled,
+    injection_protection: config.injection_protection,
     pii_redaction: config.pii_redaction,
+    fail_mode: config.fail_mode as "open" | "closed",
     fallback_message: config.fallback_message,
     log_retention_days: config.log_retention_days,
   }
@@ -131,7 +133,9 @@ function SettingsPage() {
   const [config, setConfig] = useState<SafetyConfig | null>(null)
   const [form, setForm] = useState<SecurityPostureForm>({
     global_block_enabled: false,
+    injection_protection: true,
     pii_redaction: true,
+    fail_mode: "closed",
     fallback_message: "",
     log_retention_days: 30,
   })
