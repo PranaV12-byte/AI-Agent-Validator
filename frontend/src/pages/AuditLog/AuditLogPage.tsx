@@ -17,6 +17,7 @@ function AuditLogPage() {
   const [action, setAction] = useState<ActionFilter>("ALL")
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
+  const [search, setSearch] = useState("")
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -34,6 +35,7 @@ function AuditLogPage() {
           action: action === "ALL" ? undefined : action,
           start_date: startDate || undefined,
           end_date: endDate || undefined,
+          search: search || undefined,
         })
         if (!cancelled) {
           setLogs(response.logs)
@@ -56,7 +58,7 @@ function AuditLogPage() {
     return () => {
       cancelled = true
     }
-  }, [action, page, startDate, endDate])
+  }, [action, page, startDate, endDate, search])
 
   return (
     <div className="space-y-6">
@@ -69,12 +71,14 @@ function AuditLogPage() {
         action={action}
         startDate={startDate}
         endDate={endDate}
+        search={search}
         onActionChange={(value) => {
           setAction(value)
           setPage(1)
         }}
         onStartDateChange={(value) => { setStartDate(value); setPage(1) }}
         onEndDateChange={(value) => { setEndDate(value); setPage(1) }}
+        onSearchChange={(value) => { setSearch(value); setPage(1) }}
       />
 
       <AuditTable
@@ -86,6 +90,7 @@ function AuditLogPage() {
           setAction("ALL")
           setStartDate("")
           setEndDate("")
+          setSearch("")
           setPage(1)
         }}
       />

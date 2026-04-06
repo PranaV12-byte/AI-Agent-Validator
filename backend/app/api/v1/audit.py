@@ -22,6 +22,7 @@ async def list_audit_logs(
     action: str | None = Query(None, pattern="^(BLOCKED|ALLOWED|REDACTED)$"),
     start_date: date | None = Query(None, description="Filter logs on or after this date (YYYY-MM-DD)"),
     end_date: date | None = Query(None, description="Filter logs on or before this date (YYYY-MM-DD)"),
+    search: str | None = Query(None, description="Filter by input_preview content (case-insensitive)"),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> AuditListResponse:
@@ -40,6 +41,9 @@ async def list_audit_logs(
         base_filter.append(
             AuditLog.created_at <= datetime.combine(end_date, time.max, tzinfo=timezone.utc)
         )
+
+    if search:
+        base_filter.append(AuditLog.input_preview.ilike(f"%{search}%"))
 
     count_result = await db.execute(select(func.count()).select_from(AuditLog).where(*base_filter))
     total = count_result.scalar_one()
