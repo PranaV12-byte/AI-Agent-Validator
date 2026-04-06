@@ -1,12 +1,14 @@
 import {
   FileText,
   LayoutGrid,
+  LogOut,
   Plug,
   Settings,
   ShieldCheck,
+  User,
 } from "lucide-react"
 import type { ComponentType } from "react"
-import { NavLink } from "react-router-dom"
+import { NavLink, useNavigate } from "react-router-dom"
 
 import { useAuth } from "../../hooks/useAuth"
 
@@ -21,11 +23,18 @@ const navItems: NavItem[] = [
   { to: "/audit-log", label: "Activity History", icon: FileText },
   { to: "/policies", label: "Protection Rules", icon: ShieldCheck },
   { to: "/integration", label: "Connect Your AI", icon: Plug },
+  { to: "/account", label: "Account", icon: User },
   { to: "/settings", label: "Settings", icon: Settings },
 ]
 
 function Sidebar() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  function handleLogout() {
+    logout()
+    navigate("/login?logout=1")
+  }
 
   return (
     <aside
@@ -61,10 +70,18 @@ function Sidebar() {
 
       <div className="mt-auto flex items-center gap-3 p-2 bg-white/5 rounded-xl">
         <div className="w-10 h-10 rounded-full bg-border-color shrink-0" />
-        <div className="overflow-hidden">
+        <div className="overflow-hidden flex-1">
           <p className="text-sm font-medium truncate">{user?.company_name ?? "Tenant"}</p>
           <p className="text-xs text-text-muted truncate">{user?.email ?? "--"}</p>
         </div>
+        <button
+          onClick={handleLogout}
+          className="shrink-0 p-2 text-text-muted hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          title="Sign out"
+          aria-label="Sign out"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
       </div>
     </aside>
   )

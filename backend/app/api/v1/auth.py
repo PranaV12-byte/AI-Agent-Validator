@@ -34,6 +34,7 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     SignupRequest,
     TenantProfileResponse,
+    UpdateProfileRequest,
     VerifyEmailRequest,
 )
 from app.services.email_service import send_password_reset_email, send_verification_email
@@ -351,6 +352,54 @@ async def logout(
 @router.get("/me", response_model=TenantProfileResponse)
 async def get_me(tenant: Tenant = Depends(get_current_tenant)) -> TenantProfileResponse:
     """Return current tenant profile for authenticated session."""
+    return TenantProfileResponse(
+        id=cast(UUID, tenant.id),
+        company_name=cast(str, tenant.company_name),
+        email=cast(str, tenant.email),
+        api_key_prefix=cast(str, tenant.api_key_prefix),
+        active_policy_version=cast(int, tenant.active_policy_version),
+    )
+
+
+@router.put("/me", response_model=TenantProfileResponse)
+@limiter.limit("5/hour")
+async def update_me(
+    request: Request,
+    body: UpdateProfileRequest,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> TenantProfileResponse:
+    """Update current tenant's company name or email."""
+    if body.company_name is not None:
+        tenant.company_name = body.company_name
+
+    if body.email is not None and body.email != cast(str, tenant.email):
+        existing = await db.execute(
+            select(Tenant).where(
+                Tenant.email == body.email,
+                Tenant.id != tenant.id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Email already registered.")
+        tenant.email = body.email
+        tenant.email_verified = False
+
+        verify_token = secrets.token_urlsafe(32)
+        redis = await get_redis()
+        await redis.setex(
+            f"email_verification:{verify_token}",
+            settings.email_verification_token_ttl_seconds,
+            str(tenant.id),
+        )
+        verify_url = f"{settings.frontend_url}/verify-email?token={verify_token}"
+        logger.info("email_verification_token_created", email=body.email, verify_url=verify_url)
+        if settings.environment not in ("development", "test"):
+            await send_verification_email(body.email, verify_url)
+
+    await db.commit()
+    await db.refresh(tenant)
+    logger.info("auth.profile_updated", tenant_id=str(tenant.id))
     return TenantProfileResponse(
         id=cast(UUID, tenant.id),
         company_name=cast(str, tenant.company_name),

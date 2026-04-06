@@ -401,3 +401,47 @@ class TestChangePassword:
             json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
         )
         assert resp.status_code == 401
+
+
+class TestUpdateProfile:
+    def test_update_company_name(self, client, make_tenant):
+        data = make_tenant()
+        headers = {"Authorization": f"Bearer {data['access_token']}"}
+        resp = client.put(
+            "/api/v1/auth/me",
+            json={"company_name": "New Corp Name"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["company_name"] == "New Corp Name"
+
+    def test_update_email_triggers_unverification(self, client, make_tenant):
+        import uuid
+        data = make_tenant()
+        headers = {"Authorization": f"Bearer {data['access_token']}"}
+        new_email = f"new-{uuid.uuid4()}@example.com"
+        resp = client.put(
+            "/api/v1/auth/me",
+            json={"email": new_email},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["email"] == new_email
+
+    def test_update_email_conflict(self, client, make_tenant):
+        from uuid import uuid4
+        suffix = str(uuid4())[:8]
+        alice = make_tenant(f"alice-{suffix}")
+        bob = make_tenant(f"bob-{suffix}")
+        headers_bob = {"Authorization": f"Bearer {bob['access_token']}"}
+        alice_email = f"tenant-alice-{suffix}@example.com"
+        resp = client.put(
+            "/api/v1/auth/me",
+            json={"email": alice_email},
+            headers=headers_bob,
+        )
+        assert resp.status_code == 409
+
+    def test_update_profile_requires_auth(self, client):
+        resp = client.put("/api/v1/auth/me", json={"company_name": "Hacker"})
+        assert resp.status_code == 401

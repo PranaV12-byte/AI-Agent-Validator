@@ -82,3 +82,11 @@ export async function changePasswordRequest(
     new_password: newPassword,
   })
 }
+
+export async function updateProfileRequest(payload: {
+  company_name?: string
+  email?: string
+}): Promise<TenantProfile> {
+  const response = await apiClient.put<TenantProfile>("/auth/me", payload)
+  return response.data
+}

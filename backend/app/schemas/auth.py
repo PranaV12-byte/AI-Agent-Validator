@@ -131,3 +131,10 @@ class ChangePasswordRequest(BaseModel):
         if not _HAS_DIGIT.search(value):
             raise ValueError("Password must contain at least one number.")
         return value
+
+
+class UpdateProfileRequest(BaseModel):
+    """Request body for updating tenant profile (company name or email)."""
+
+    company_name: str | None = Field(default=None, min_length=1, max_length=255)
+    email: EmailStr | None = None
