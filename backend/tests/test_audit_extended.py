@@ -346,3 +346,34 @@ class TestAuditSearch:
     def test_search_requires_auth(self, client):
         resp = client.get("/api/v1/audit/", params={"search": "test"})
         assert resp.status_code == 401
+
+
+class TestAuditExport:
+    def test_export_returns_csv(self, client, make_tenant):
+        headers = {"Authorization": f"Bearer {make_tenant()['access_token']}"}
+        resp = client.get("/api/v1/audit/export", headers=headers)
+        assert resp.status_code == 200
+        assert "text/csv" in resp.headers["content-type"]
+        assert "attachment" in resp.headers["content-disposition"]
+        assert "safebot-audit-export.csv" in resp.headers["content-disposition"]
+
+    def test_export_csv_has_headers(self, client, make_tenant):
+        headers = {"Authorization": f"Bearer {make_tenant()['access_token']}"}
+        resp = client.get("/api/v1/audit/export", headers=headers)
+        first_line = resp.text.split("\n")[0]
+        assert "id" in first_line
+        assert "action" in first_line
+        assert "created_at" in first_line
+
+    def test_export_accepts_same_filters_as_list(self, client, make_tenant):
+        headers = {"Authorization": f"Bearer {make_tenant()['access_token']}"}
+        resp = client.get(
+            "/api/v1/audit/export",
+            params={"action": "BLOCKED", "search": "test"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+
+    def test_export_requires_auth(self, client):
+        resp = client.get("/api/v1/audit/export")
+        assert resp.status_code == 401

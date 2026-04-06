@@ -29,3 +29,23 @@ export async function fetchAuditLogs(
 
   return response.data
 }
+
+type ExportAuditLogsParams = {
+  action?: "BLOCKED" | "ALLOWED" | "REDACTED"
+  start_date?: string
+  end_date?: string
+  search?: string
+}
+
+export async function exportAuditLogs(params: ExportAuditLogsParams = {}): Promise<void> {
+  const response = await apiClient.get<Blob>("/audit/export", {
+    params,
+    responseType: "blob",
+  })
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = "safebot-audit-export.csv"
+  link.click()
+  URL.revokeObjectURL(url)
+}

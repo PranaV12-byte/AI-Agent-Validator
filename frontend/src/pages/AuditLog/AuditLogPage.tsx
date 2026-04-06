@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import type { AuditLog } from "../../types/api"
-import { fetchAuditLogs } from "../../services/auditService"
+import { exportAuditLogs, fetchAuditLogs } from "../../services/auditService"
 import AuditDetailDrawer from "./components/AuditDetailDrawer"
 import AuditFilterBar, { type ActionFilter } from "./components/AuditFilterBar"
 import AuditTable from "./components/AuditTable"
@@ -62,9 +62,18 @@ function AuditLogPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold mb-1">Activity History</h1>
-        <p className="text-text-muted">A record of every message your AI assistant checked.</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold mb-1">Activity History</h1>
+          <p className="text-text-muted">A record of every message your AI assistant checked.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void exportAuditLogs({ action: action === "ALL" ? undefined : action, start_date: startDate || undefined, end_date: endDate || undefined, search: search || undefined })}
+          className="flex items-center gap-2 px-4 py-2 text-sm bg-card-bg border border-border-color rounded-lg hover:border-brand-green transition-colors"
+        >
+          Export CSV
+        </button>
       </div>
 
       <AuditFilterBar
