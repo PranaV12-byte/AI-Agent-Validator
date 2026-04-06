@@ -6,19 +6,26 @@ type AuditDetailDrawerProps = {
 }
 
 function inferReason(log: AuditLog): string {
-  if (log.action === "BLOCKED") {
-    return log.violation_type ?? "Blocked by policy"
-  }
-  if (log.action === "REDACTED") {
-    return log.violation_type ?? "Sensitive data redacted"
-  }
+  if (log.action === "BLOCKED") return log.violation_type ?? "Blocked by policy"
+  if (log.action === "REDACTED") return log.violation_type ?? "Sensitive data redacted"
   return "Request allowed by guardrails"
 }
 
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString()
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-text-muted mb-1">{label}</p>
+      <div className="font-medium text-sm">{children}</div>
+    </div>
+  )
+}
+
 function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
-  if (!log) {
-    return null
-  }
+  if (!log) return null
 
   return (
     <aside
@@ -40,15 +47,31 @@ function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
       </div>
 
       <div className="space-y-5 text-sm">
-        <div>
-          <p className="text-text-muted mb-1">Action</p>
-          <p className="font-medium uppercase">{log.action.toLowerCase()}</p>
-        </div>
-
-        <div>
-          <p className="text-text-muted mb-1">Reason</p>
-          <p className="font-medium">{inferReason(log)}</p>
-        </div>
+        <Field label="Timestamp">{formatTimestamp(log.created_at)}</Field>
+        <Field label="Action"><span className="uppercase">{log.action.toLowerCase()}</span></Field>
+        <Field label="Reason">{inferReason(log)}</Field>
+        <Field label="Hook Type">{log.hook_type}</Field>
+        <Field label="Severity">{log.severity}</Field>
+        {log.processing_ms !== null ? (
+          <Field label="Processing Time">{log.processing_ms}ms</Field>
+        ) : null}
+        {log.policy_version !== null ? (
+          <Field label="Policy Version">{log.policy_version}</Field>
+        ) : null}
+        {log.session_id ? <Field label="Session ID">{log.session_id}</Field> : null}
+        {log.ip_address ? <Field label="IP Address">{log.ip_address}</Field> : null}
+        {log.algorand_tx_id ? (
+          <Field label="Blockchain Record">
+            <a
+              href={`https://testnet.explorer.perawallet.app/tx/${log.algorand_tx_id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-brand-green hover:underline font-mono text-xs"
+            >
+              {log.algorand_tx_id}
+            </a>
+          </Field>
+        ) : null}
 
         <div>
           <p className="text-text-muted mb-1">Agent Input Payload</p>
