@@ -1,5 +1,6 @@
 import type { ReactElement } from "react"
 import { render } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 
 import { AuthProvider } from "../../context/AuthContext"
 
@@ -25,5 +26,9 @@ export function makeMockJwt(sub = "tenant-1"): string {
 export const MOCK_JWT = makeMockJwt()
 
 export function renderWithProviders(ui: ReactElement) {
-  return render(<AuthProvider>{ui}</AuthProvider>)
+  return render(
+    <MemoryRouter>
+      <AuthProvider>{ui}</AuthProvider>
+    </MemoryRouter>,
+  )
 }
