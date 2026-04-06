@@ -39,8 +39,8 @@ describe("SecurityPostureCard", () => {
   it("renders pii_redaction checkbox as checked when true", () => {
     render(<SecurityPostureCard form={{ ...defaultForm, pii_redaction: true }} onChange={vi.fn()} />)
     const checkboxes = screen.getAllByRole("checkbox")
-    // Second checkbox is pii_redaction
-    expect(checkboxes[1]).toBeChecked()
+    // Third checkbox is pii_redaction (index 2; index 1 is injection_protection)
+    expect(checkboxes[2]).toBeChecked()
   })
 
   it("calls onChange with toggled global_block_enabled when checkbox clicked", async () => {
@@ -59,10 +59,10 @@ describe("SecurityPostureCard", () => {
   it("calls onChange with toggled pii_redaction when checkbox clicked", async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(<SecurityPostureCard form={defaultForm} onChange={onChange} />)
+    render(<SecurityPostureCard form={{ ...defaultForm, pii_redaction: false }} onChange={onChange} />)
 
     const checkboxes = screen.getAllByRole("checkbox")
-    await user.click(checkboxes[1])
+    await user.click(checkboxes[2])
 
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ pii_redaction: true }),
