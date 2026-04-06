@@ -1,10 +1,11 @@
-import { ShieldCheck } from "lucide-react"
+import { Eye, EyeOff, ShieldCheck } from "lucide-react"
 import type { FormEvent } from "react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
 import { apiClient } from "../../services/apiClient"
+import type { AuthResponse } from "../../types/api"
 
 function SignupPage() {
   const navigate = useNavigate()
@@ -12,9 +13,13 @@ function SignupPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [emailExists, setEmailExists] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [verificationUrl, setVerificationUrl] = useState<string | null>(null)
+  const [awaitingVerification, setAwaitingVerification] = useState(false)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -39,13 +44,22 @@ function SignupPage() {
     setIsSubmitting(true)
 
     try {
-      await apiClient.post("/auth/signup", {
+      const resp = await apiClient.post<AuthResponse>("/auth/signup", {
         company_name: companyName,
         email,
         password,
       })
-      toast.success("Account created! Please sign in.")
-      setTimeout(() => navigate("/login?signup=1"), 1500)
+      const data = resp.data
+
+      if (data.email_verified === false) {
+        // Production: email not yet verified — show "check your inbox" state
+        setVerificationUrl(data.verification_url ?? null)
+        setAwaitingVerification(true)
+      } else {
+        // Development/test: auto-verified — redirect to login
+        toast.success("Account created! Please sign in.")
+        setTimeout(() => navigate("/login?signup=1"), 1500)
+      }
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       if (typeof detail === "string" && detail.toLowerCase().includes("already registered")) {
@@ -61,6 +75,47 @@ function SignupPage() {
 
   const passwordMismatch =
     password.length > 0 && confirmPassword.length > 0 && password !== confirmPassword
+
+  if (awaitingVerification) {
+    return (
+      <div className="h-full bg-dashboard-bg text-white flex items-center justify-center p-6">
+        <div className="w-full max-w-md bg-card-bg border border-border-color rounded-2xl p-8 space-y-4">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-brand-green/20 rounded-lg flex items-center justify-center border border-brand-green/30">
+              <ShieldCheck className="w-6 h-6 text-brand-green" />
+            </div>
+            <div>
+              <p className="text-xl font-bold tracking-tight">Safebot</p>
+              <p className="text-text-muted text-sm">Check your email</p>
+            </div>
+          </div>
+          <p className="text-sm text-text-muted">
+            Account created! We sent a verification link to <strong>{email}</strong>.
+            Please check your inbox and click the link to activate your account.
+          </p>
+          {import.meta.env.DEV && verificationUrl ? (
+            <div className="bg-brand-green/10 border border-brand-green/30 rounded-lg p-3 space-y-2">
+              <p className="text-xs text-brand-green font-medium">
+                Dev mode — click to verify instantly:
+              </p>
+              <a
+                href={verificationUrl}
+                className="block text-xs text-brand-green underline break-all"
+              >
+                {verificationUrl}
+              </a>
+            </div>
+          ) : null}
+          <button
+            onClick={() => navigate("/login")}
+            className="w-full rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green px-4 py-2.5 font-medium hover:bg-brand-green/20 transition-colors text-sm"
+          >
+            Back to sign in
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full bg-dashboard-bg text-white flex items-center justify-center p-6">
@@ -107,32 +162,52 @@ function SignupPage() {
             <label htmlFor="signup-password" className="block text-sm text-text-muted mb-2">
               Password
             </label>
-            <input
-              id="signup-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              className="w-full bg-dashboard-bg border border-border-color rounded-lg px-4 py-2.5 text-sm focus:ring-1 focus:ring-brand-green focus:outline-none"
-            />
+            <div className="relative">
+              <input
+                id="signup-password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                className="w-full bg-dashboard-bg border border-border-color rounded-lg px-4 py-2.5 text-sm pr-10 focus:ring-1 focus:ring-brand-green focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-white"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <div>
             <label htmlFor="signup-confirm-password" className="block text-sm text-text-muted mb-2">
               Confirm password
             </label>
-            <input
-              id="signup-confirm-password"
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              required
-              className={`w-full bg-dashboard-bg border rounded-lg px-4 py-2.5 text-sm focus:ring-1 focus:outline-none ${
-                passwordMismatch
-                  ? "border-brand-red focus:ring-brand-red"
-                  : "border-border-color focus:ring-brand-green"
-              }`}
-            />
+            <div className="relative">
+              <input
+                id="signup-confirm-password"
+                type={showConfirmPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                required
+                className={`w-full bg-dashboard-bg border rounded-lg px-4 py-2.5 text-sm pr-10 focus:ring-1 focus:outline-none ${
+                  passwordMismatch
+                    ? "border-brand-red focus:ring-brand-red"
+                    : "border-border-color focus:ring-brand-green"
+                }`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-white"
+                aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+              >
+                {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
             {passwordMismatch ? (
               <p className="text-xs text-brand-red mt-1">Passwords do not match.</p>
             ) : null}

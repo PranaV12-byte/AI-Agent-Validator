@@ -1,4 +1,4 @@
-import { ShieldCheck } from "lucide-react"
+import { Eye, EyeOff, ShieldCheck } from "lucide-react"
 import type { FormEvent } from "react"
 import { useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
@@ -12,6 +12,8 @@ function ResetPasswordPage() {
 
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -30,6 +32,10 @@ function ResetPasswordPage() {
     }
     if (newPassword.length < 8) {
       setError("Password must be at least 8 characters.")
+      return
+    }
+    if (!/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setError("Password must contain at least one letter and one number.")
       return
     }
     if (newPassword !== confirmPassword) {
@@ -92,14 +98,24 @@ function ResetPasswordPage() {
             >
               New password
             </label>
-            <input
-              id="reset-new-password"
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              required
-              className="w-full bg-dashboard-bg border border-border-color rounded-lg px-4 py-2.5 text-sm focus:ring-1 focus:ring-brand-green focus:outline-none"
-            />
+            <div className="relative">
+              <input
+                id="reset-new-password"
+                type={showNewPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                required
+                className="w-full bg-dashboard-bg border border-border-color rounded-lg px-4 py-2.5 text-sm pr-10 focus:ring-1 focus:ring-brand-green focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-white"
+                aria-label={showNewPassword ? "Hide password" : "Show password"}
+              >
+                {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <div>
@@ -109,18 +125,28 @@ function ResetPasswordPage() {
             >
               Confirm new password
             </label>
-            <input
-              id="reset-confirm-password"
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              required
-              className={`w-full bg-dashboard-bg border rounded-lg px-4 py-2.5 text-sm focus:ring-1 focus:outline-none ${
-                passwordMismatch
-                  ? "border-brand-red focus:ring-brand-red"
-                  : "border-border-color focus:ring-brand-green"
-              }`}
-            />
+            <div className="relative">
+              <input
+                id="reset-confirm-password"
+                type={showConfirmPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                required
+                className={`w-full bg-dashboard-bg border rounded-lg px-4 py-2.5 text-sm pr-10 focus:ring-1 focus:outline-none ${
+                  passwordMismatch
+                    ? "border-brand-red focus:ring-brand-red"
+                    : "border-border-color focus:ring-brand-green"
+                }`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-white"
+                aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+              >
+                {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
             {passwordMismatch ? (
               <p className="text-xs text-brand-red mt-1">
                 Passwords do not match.
