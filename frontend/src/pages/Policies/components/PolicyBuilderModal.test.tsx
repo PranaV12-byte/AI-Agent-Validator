@@ -1,6 +1,15 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+const defaultModalProps = {
+  mode: "create" as const,
+  policy: null,
+  isOpen: true,
+  isSaving: false,
+  onClose: vi.fn(),
+  onSave: vi.fn(),
+}
+
 import PolicyBuilderModal from "./PolicyBuilderModal"
 
 afterEach(() => {
@@ -59,5 +68,25 @@ describe("PolicyBuilderModal", () => {
     })
 
     expect(saveButton).toBeEnabled()
+  })
+
+  it("closes on Escape key", () => {
+    const onClose = vi.fn()
+    render(<PolicyBuilderModal {...defaultModalProps} onClose={onClose} />)
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it("closes when backdrop is clicked", () => {
+    const onClose = vi.fn()
+    render(<PolicyBuilderModal {...defaultModalProps} onClose={onClose} />)
+    fireEvent.click(screen.getByTestId("modal-backdrop"))
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it("shows X button instead of text Close", () => {
+    render(<PolicyBuilderModal {...defaultModalProps} />)
+    expect(screen.queryByRole("button", { name: /^Close$/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /close/i })).toBeInTheDocument()
   })
 })

@@ -1,5 +1,7 @@
-import type { Policy, PolicyCreatePayload, PolicyRuleType } from "../../../types/api"
+import { X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+
+import type { Policy, PolicyCreatePayload, PolicyRuleType } from "../../../types/api"
 
 type PolicyBuilderModalProps = {
   mode: "create" | "edit"
@@ -71,6 +73,15 @@ function PolicyBuilderModal({
     setKeyword(String(policy?.parameters?.keyword ?? ""))
   }, [policy, isOpen])
 
+  useEffect(() => {
+    if (!isOpen) return
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [isOpen, onClose])
+
   const isSaveDisabled = useMemo(() => {
     if (!name.trim() || !ruleText.trim()) {
       return true
@@ -113,11 +124,18 @@ function PolicyBuilderModal({
   }
 
   return (
-    <aside className="fixed top-0 right-0 h-full w-full max-w-xl bg-sidebar-bg border-l border-border-color shadow-2xl z-50 p-6 overflow-y-auto">
+    <>
+      <div
+        data-testid="modal-backdrop"
+        className="fixed inset-0 bg-black/40 z-40"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <aside className="fixed top-0 right-0 h-full w-full max-w-xl bg-sidebar-bg border-l border-border-color shadow-2xl z-50 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold">{mode === "create" ? "New Protection Rule" : "Edit Protection Rule"}</h2>
-        <button type="button" onClick={onClose} className="text-text-muted hover:text-white">
-          Close
+        <button type="button" onClick={onClose} className="text-text-muted hover:text-white" aria-label="Close panel">
+          <X className="w-5 h-5" />
         </button>
       </div>
 
@@ -250,6 +268,7 @@ function PolicyBuilderModal({
         </div>
       </div>
     </aside>
+    </>
   )
 }
 
