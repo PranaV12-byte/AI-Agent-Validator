@@ -66,7 +66,7 @@ function PolicyList({
                 <div className="h-4 w-full bg-border-color/70 rounded animate-pulse" />
               </div>
             ))
-          : policies.length === 0
+          : (policies ?? []).length === 0
             ? (
               <div className="md:col-span-2 xl:col-span-3 bg-card-bg border border-border-color rounded-2xl p-10 text-center">
                 <ShieldAlert className="w-10 h-10 text-text-muted mx-auto mb-4" />
@@ -83,7 +83,7 @@ function PolicyList({
                 </button>
               </div>
               )
-          : policies.map((policy) => (
+          : (policies ?? []).map((policy) => (
               <article key={policy.id} className="bg-card-bg border border-border-color rounded-2xl p-5">
                 <div className="flex items-start justify-between gap-4 mb-4">
                   <div>

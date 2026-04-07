@@ -1,8 +1,8 @@
 """Safebot FastAPI Application Entry Point."""
 
 from contextlib import asynccontextmanager
-
 import logging
+import uuid
 
 import sentry_sdk
 import structlog
@@ -14,6 +14,8 @@ from slowapi.errors import RateLimitExceeded
 from app.api.v1 import audit, auth, dashboard, health, hooks, policies
 from app.config import settings
 from app.core.rate_limit import limiter, rate_limit_exceeded_handler
+from app.core.redis_client import get_redis
+from app.database import engine
 from app.services.guardrails import injection_detector, pii_redactor, policy_engine
 
 # 5.5 — Configure structlog: JSON in production, human-readable in development.
@@ -132,6 +134,17 @@ async def lifespan(app: FastAPI):
                 "ALGORAND_APP_ID must be set in production. "
                 "Mock TX IDs are not acceptable for production compliance audit trails."
             )
+    elif settings.environment == "production" and settings.algorand_network != "mainnet":
+        raise RuntimeError(
+            f"ALGORAND_NETWORK is '{settings.algorand_network}' but ENVIRONMENT is 'production'. "
+            "Set ALGORAND_NETWORK=mainnet to write audit events to the mainnet blockchain. "
+            "Testnet entries have no legal or compliance value."
+        )
+
+    logger.info("startup", msg="Verifying Redis connectivity...")
+    redis = await get_redis()
+    await redis.ping()
+    logger.info("startup", msg="Redis connection verified.")
 
     logger.info("startup", msg="Loading ML models...")
     injection_detector.load_model()
@@ -140,6 +153,12 @@ async def lifespan(app: FastAPI):
     logger.info("startup_complete", msg="All models loaded. Safebot ready.")
     yield
     logger.info("shutdown", msg="Safebot shutting down gracefully.")
+    await engine.dispose()
+    try:
+        redis = await get_redis()
+        await redis.aclose()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -158,6 +177,25 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next) -> Response:
+    """
+    Assign a unique request ID to every request for end-to-end tracing.
+
+    Reads X-Request-ID from the incoming request if present (useful when a
+    load balancer or API gateway sets it); otherwise generates a fresh UUID4.
+    The ID is bound to structlog's context-var store so every log statement
+    emitted during this request automatically includes it — no changes needed
+    to existing log call-sites.
+    """
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:

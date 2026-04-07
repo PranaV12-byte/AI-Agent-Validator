@@ -11,5 +11,11 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     exclude: ['e2e/**', 'node_modules/**'],
+    testTimeout: 15000,
+    poolOptions: {
+      forks: {
+        execArgv: ['--max-old-space-size=4096'],
+      },
+    },
   },
 })

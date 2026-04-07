@@ -4,6 +4,10 @@ Revision ID: 91d725d72296
 Revises: 1f7f4ccdbb39
 Create Date: 2026-03-20 01:29:51.005589
 
+This migration is intentionally empty. The schema changes it originally
+targeted were consolidated into 0000_initial_schema.py. It is kept in
+the revision chain to preserve Alembic's linear history for databases
+that already ran it.
 """
 from typing import Sequence, Union
 

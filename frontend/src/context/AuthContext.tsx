@@ -87,7 +87,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     // Best-effort server-side revocation (fire-and-forget).
     const refreshToken = sessionRef.current?.refreshToken ?? null
-    logoutRequest(refreshToken).catch(() => {/* ignore — local session cleared regardless */})
+    logoutRequest(refreshToken).catch((err) => {
+      // Server-side revocation failed; local session cleared regardless.
+      // The refresh token will remain valid until its TTL expires.
+      console.warn("Server-side logout failed; refresh token may remain valid until TTL expiry.", err)
+    })
     localStorage.removeItem(STORAGE_KEY)
     setSession(null)
     setUser(null)

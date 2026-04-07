@@ -66,14 +66,28 @@ def do_run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
+# Advisory lock ID — arbitrary stable integer, unique to this application.
+# Prevents two concurrent `alembic upgrade head` runs from corrupting state.
+_MIGRATION_LOCK_ID = 7734968410  # sha256("safebot-migrations")[:8]
+
+
 async def run_async_migrations() -> None:
-    """Create a temporary async engine and run pending migrations."""
+    """Create a temporary async engine and run pending migrations.
+
+    Acquires a PostgreSQL advisory lock before migrating so that concurrent
+    deploys (e.g., two pods starting simultaneously) do not race each other.
+    """
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
     async with connectable.connect() as connection:
+        # pg_advisory_lock is session-scoped — it persists across transactions,
+        # so we can commit the acquisition and let Alembic own the DDL transaction.
+        from sqlalchemy import text as sa_text
+        await connection.execute(sa_text(f"SELECT pg_advisory_lock({_MIGRATION_LOCK_ID})"))
+        await connection.commit()  # release the implicit autobegin transaction
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()
 

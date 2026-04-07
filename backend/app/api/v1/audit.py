@@ -25,7 +25,7 @@ async def list_audit_logs(
     action: str | None = Query(None, pattern="^(BLOCKED|ALLOWED|REDACTED)$"),
     start_date: date | None = Query(None, description="Filter logs on or after this date (YYYY-MM-DD)"),
     end_date: date | None = Query(None, description="Filter logs on or before this date (YYYY-MM-DD)"),
-    search: str | None = Query(None, description="Filter by input_preview content (case-insensitive)"),
+    search: str | None = Query(None, max_length=500, description="Filter by input_preview content (case-insensitive)"),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> AuditListResponse:
@@ -79,7 +79,7 @@ async def export_audit_logs(
     action: str | None = Query(None, pattern="^(BLOCKED|ALLOWED|REDACTED)$"),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    search: str | None = Query(None),
+    search: str | None = Query(None, max_length=500),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
@@ -113,8 +113,6 @@ async def export_audit_logs(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(CSV_FIELDS)
-    if total > EXPORT_CAP:
-        writer.writerow([f"# Truncated to {EXPORT_CAP} rows (total: {total})"] + [""] * (len(CSV_FIELDS) - 1))
 
     for log in logs:
         writer.writerow([
@@ -133,8 +131,13 @@ async def export_audit_logs(
         ])
 
     output.seek(0)
+    response_headers: dict[str, str] = {
+        "Content-Disposition": 'attachment; filename="safebot-audit-export.csv"',
+    }
+    if total > EXPORT_CAP:
+        response_headers["X-Safebot-Truncated"] = f"true; total={total}; exported={EXPORT_CAP}"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="safebot-audit-export.csv"'},
+        headers=response_headers,
     )

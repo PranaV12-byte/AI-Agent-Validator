@@ -55,6 +55,21 @@ class Settings(BaseSettings):
     password_reset_token_ttl_seconds: int = 900  # 15 minutes
     frontend_url: str = "http://localhost:5173"
 
+    # Email (SMTP) — leave smtp_host empty to disable sending (dev/test default)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@safebot.ai"
+    smtp_from_name: str = "Safebot"
+    smtp_tls: bool = True   # STARTTLS on port 587
+    smtp_ssl: bool = False  # SSL on port 465 (overrides smtp_tls)
+    email_verification_token_ttl_seconds: int = 86400  # 24 hours
+
+    # Policy engine
+    policy_similarity_threshold: float = 0.65
+    policy_max_top_k: int = 20
+
     # CORS — comma-separated origins or JSON array string
     # Example: CORS_ORIGINS='["https://app.example.com"]'
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]

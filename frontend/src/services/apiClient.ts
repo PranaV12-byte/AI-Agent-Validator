@@ -15,8 +15,8 @@ function isRetryable(error: unknown): boolean {
  */
 export function getErrorMessage(error: unknown, fallback = "An unexpected error occurred."): string {
   if (!axios.isAxiosError(error)) return fallback
-  const detail = (error.response?.data as { detail?: string } | undefined)?.detail
-  if (detail) return detail
+  const detail = (error.response?.data as { detail?: unknown } | undefined)?.detail
+  if (typeof detail === "string") return detail
   if (!error.response) return "Network error — check your connection and try again."
   switch (error.response.status) {
     case 400: return "Invalid request. Please check your input."
@@ -89,7 +89,11 @@ function ensureRefresh(): Promise<void> {
 apiClient.interceptors.request.use(async (config) => {
   const { accessToken } = getSession()
 
-  if (accessToken && refreshHandler) {
+  // Skip proactive refresh for requests that are themselves part of the refresh flow
+  // to prevent a circular deadlock: refresh request → interceptor → ensureRefresh() → same refreshPromise
+  const skip = (config as Record<string, unknown>)._skipProactiveRefresh
+
+  if (!skip && accessToken && refreshHandler) {
     const exp = getTokenExpiry(accessToken)
     if (exp !== null && Date.now() / 1000 > exp - 60) {
       try {

@@ -49,6 +49,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Mask CI secrets
+        run: |
+          echo "::add-mask::${{ secrets.CI_JWT_SECRET }}"
+
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
         with:
@@ -72,8 +76,18 @@ jobs:
           uv run pip-audit --skip-editable -r <(uv pip freeze)
         working-directory: backend
 
-      - name: Run backend test suite
-        run: uv run python -m pytest -q
+      - name: Run unit tests (fast gate)
+        run: uv run python -m pytest tests/unit/ -q --tb=short
+        working-directory: backend
+
+      - name: Run integration + security tests with coverage
+        run: |
+          uv run python -m pytest tests/ \
+            --ignore=tests/unit \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-fail-under=70 \
+            -q
         working-directory: backend
 
   frontend-unit-build:
@@ -238,6 +252,12 @@ jobs:
             e2e/policy-fail-open-vs-closed.spec.ts \
             e2e/policy-rollback.spec.ts \
             e2e/password-reset.spec.ts \
+            e2e/settings-flow.spec.ts \
+            e2e/audit-filters.spec.ts \
+            e2e/policy-crud.spec.ts \
+            e2e/signup-validation.spec.ts \
+            e2e/error-recovery.spec.ts \
+            e2e/onboarding-journey.spec.ts \
             --project=chromium
         working-directory: frontend
 

@@ -36,7 +36,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/safebot
       REDIS_URL: redis://localhost:6379/0
-      JWT_SECRET_KEY: nightly-secret-key
+      JWT_SECRET_KEY: ${{ secrets.CI_JWT_SECRET }}
       JWT_ALGORITHM: HS256
       JWT_EXPIRE_MINUTES: 1440
       ALGORAND_APP_ID: 0
@@ -49,6 +49,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Mask CI secrets
+        run: |
+          echo "::add-mask::${{ secrets.CI_JWT_SECRET }}"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -72,8 +76,19 @@ jobs:
         run: alembic upgrade head
         working-directory: backend
 
-      - name: Run full backend tests
-        run: python -m pytest -q
+      - name: Run unit tests (fast gate)
+        run: python -m pytest tests/unit/ -q --tb=short
+        working-directory: backend
+
+      - name: Run full backend tests with coverage
+        run: |
+          python -m pytest tests/ \
+            --ignore=tests/unit \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=html:htmlcov \
+            --cov-fail-under=70 \
+            -q
         working-directory: backend
 
       - name: Start backend
@@ -170,7 +185,7 @@ jobs:
           with open(os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "perf_api_key.txt"), "w", encoding="utf-8") as fh:
               fh.write(api_key)
           PY
-          API_KEY=$(cat "$RUNNER_TEMP/perf_api_key.txt") python scripts/load_validate_smoke.py --mode smoke --api-base-url "$API_BASE_URL" --api-key "$API_KEY" --total-requests 200 --concurrency 10 --request-timeout 60 --max-server-errors 999999 --max-p95-ms 999999 --max-ok-p95-ms 999999 --summary-json perf_smoke_summary.json
+          API_KEY=$(cat "$RUNNER_TEMP/perf_api_key.txt") python scripts/load_validate_smoke.py --mode smoke --api-base-url "$API_BASE_URL" --api-key "$API_KEY" --total-requests 200 --concurrency 10 --request-timeout 60 --max-server-errors 5 --max-p95-ms 5000 --max-ok-p95-ms 3000 --summary-json perf_smoke_summary.json
         working-directory: backend
 
       - name: Upload nightly artifacts
@@ -182,4 +197,5 @@ jobs:
             backend_nightly.log
             frontend_nightly.log
             backend/perf_smoke_summary.json
+            backend/htmlcov
             frontend/test-results

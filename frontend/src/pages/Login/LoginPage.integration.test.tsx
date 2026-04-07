@@ -66,7 +66,7 @@ describe("Login integration", () => {
     await user.type(screen.getByLabelText("Password"), "wrong-pass")
     await user.click(screen.getByRole("button", { name: "Sign in" }))
 
-    expect(await screen.findByText("Invalid email or password.")).toBeInTheDocument()
+    expect(await screen.findByText("Invalid email or password")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument()
   })
 
@@ -133,7 +133,7 @@ describe("Login integration", () => {
     await user.type(screen.getByLabelText("Password"), "TestPass123!")
     await user.click(screen.getByRole("button", { name: "Sign in" }))
 
-    expect(await screen.findByText("Invalid email or password.")).toBeInTheDocument()
+    expect(await screen.findByText("Bad request")).toBeInTheDocument()
   })
 
   it("navigates to redirect_uri after successful login", async () => {

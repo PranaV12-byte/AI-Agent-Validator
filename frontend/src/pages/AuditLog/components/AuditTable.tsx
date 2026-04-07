@@ -68,7 +68,7 @@ function AuditTable({
                     <td className="px-6 py-5"><div className="h-4 w-8 bg-border-color/70 rounded animate-pulse" /></td>
                   </tr>
                 ))
-              : logs.length === 0
+              : (logs ?? []).length === 0
                 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-12">
@@ -89,7 +89,7 @@ function AuditTable({
                     </td>
                   </tr>
                   )
-              : logs.map((log) => (
+              : (logs ?? []).map((log) => (
                   <tr
                     key={log.id}
                     data-testid={`audit-row-${log.id}`}

@@ -48,6 +48,7 @@ class Tenant(Base):
     api_key_prefix = Column(String(8), nullable=False)
     active_policy_version = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
+    email_verified = Column(Boolean, nullable=False, default=False)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

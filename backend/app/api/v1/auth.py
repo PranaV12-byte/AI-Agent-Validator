@@ -388,7 +388,7 @@ async def update_me(
         verify_token = secrets.token_urlsafe(32)
         redis = await get_redis()
         await redis.setex(
-            f"email_verification:{verify_token}",
+            f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
             settings.email_verification_token_ttl_seconds,
             str(tenant.id),
         )
@@ -396,6 +396,11 @@ async def update_me(
         logger.info("email_verification_token_created", email=body.email, verify_url=verify_url)
         if settings.environment not in ("development", "test"):
             await send_verification_email(body.email, verify_url)
+
+        # Revoke all existing sessions so the user must re-authenticate
+        # after verifying the new email. Prevents continued access with
+        # an unverified email if the account is compromised.
+        await _revoke_all_sessions_for_tenant(str(tenant.id))
 
     await db.commit()
     await db.refresh(tenant)

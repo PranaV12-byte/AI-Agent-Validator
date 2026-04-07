@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test"
 
+const isNightly = !!process.env.NIGHTLY
+
 export default defineConfig({
   testDir: "./e2e",
   timeout: 120_000,
@@ -7,8 +9,10 @@ export default defineConfig({
     timeout: 10_000,
   },
   fullyParallel: false,
-  workers: 1,
-  reporter: "list",
+  workers: isNightly ? 2 : 1,
+  reporter: isNightly
+    ? [["list"], ["html", { open: "never" }]]
+    : "list",
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173",
     trace: "on-first-retry",
@@ -18,5 +22,13 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    ...(isNightly
+      ? [
+          {
+            name: "firefox",
+            use: { ...devices["Desktop Firefox"] },
+          },
+        ]
+      : []),
   ],
 })

@@ -54,10 +54,10 @@ class PolicyEngine:
         """Generate embedding for a policy and store in policy_embeddings table."""
         embedding_vector = self.encode(policy.rule_text)
 
-        # Delete old embeddings for this policy
+        # Delete old embeddings for this policy (tenant_id included for defense-in-depth)
         await db.execute(
-            text("DELETE FROM policy_embeddings WHERE policy_id = :pid"),
-            {"pid": str(policy.id)},
+            text("DELETE FROM policy_embeddings WHERE policy_id = :pid AND tenant_id = :tid"),
+            {"pid": str(policy.id), "tid": str(tenant_id)},
         )
 
         pe = PolicyEmbedding(
@@ -74,22 +74,27 @@ class PolicyEngine:
     ) -> PolicyCheckResult:
         """
         Check if a message violates any tenant policies via semantic similarity.
-        Returns policies with cosine similarity > 0.65 (configurable threshold).
+        Returns policies with cosine similarity above the configured threshold.
         """
-        SIMILARITY_THRESHOLD = 0.65
+        from app.config import settings
+
+        # Cap top_k server-side to prevent DoS via expensive unbounded queries.
+        top_k = min(top_k, settings.policy_max_top_k)
+        SIMILARITY_THRESHOLD = settings.policy_similarity_threshold
 
         query_embedding = self.encode(message)
 
         # pgvector cosine similarity search
+        # Note: CAST syntax avoids SQLAlchemy misinterpreting ::vector as a parameter
         sql = text("""
             SELECT pe.policy_id, pe.chunk_text,
-                   1 - (pe.embedding <=> :query_vec::vector) AS similarity,
+                   1 - (pe.embedding <=> CAST(:query_vec AS vector)) AS similarity,
                    p.name AS policy_name, p.rule_text
             FROM policy_embeddings pe
             JOIN policies p ON pe.policy_id = p.id
             WHERE pe.tenant_id = :tid
               AND p.is_enabled = true
-            ORDER BY pe.embedding <=> :query_vec::vector
+            ORDER BY pe.embedding <=> CAST(:query_vec AS vector)
             LIMIT :top_k
         """)
 

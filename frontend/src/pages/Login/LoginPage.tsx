@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { useAuth } from "../../hooks/useAuth"
+import { getErrorMessage } from "../../services/apiClient"
 
 function LoginPage() {
   const { login } = useAuth()
@@ -33,8 +34,8 @@ function LoginPage() {
     try {
       await login({ email, password })
       navigate(redirectUri, { replace: true })
-    } catch {
-      setError("Invalid email or password.")
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Invalid email or password."))
     } finally {
       setIsSubmitting(false)
     }

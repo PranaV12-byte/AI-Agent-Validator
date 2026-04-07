@@ -3,6 +3,8 @@ export type AuthResponse = {
   token_type: string
   api_key?: string | null
   refresh_token?: string | null
+  email_verified?: boolean | null
+  verification_url?: string | null
 }
 
 export type TenantProfile = {

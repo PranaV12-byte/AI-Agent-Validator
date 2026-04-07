@@ -12,6 +12,16 @@ worker_class = "uvicorn.workers.UvicornWorker"
 workers = multiprocessing.cpu_count() * 2 + 1
 threads = 1  # UvicornWorker is single-threaded inside; concurrency via async
 
+# Recycle workers after N requests (with jitter) to prevent memory accumulation
+# from ML inference and DB connection churn.
+max_requests = 1000
+max_requests_jitter = 100
+
+# Load the application in the master process and fork workers from it.
+# This loads the 3 ML models once instead of N times per worker, saving
+# ~500 MB–1 GB of RAM per worker on a typical ML-loaded deployment.
+preload_app = True
+
 # ── Binding ───────────────────────────────────────────────────────────────────
 bind = "0.0.0.0:8000"
 

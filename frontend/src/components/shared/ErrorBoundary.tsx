@@ -11,8 +11,20 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    if (import.meta.env.DEV) {
-      console.error("ErrorBoundary caught:", error, info.componentStack)
+    // Always log — in dev to console, in production also report to Sentry if configured.
+    console.error("ErrorBoundary caught:", error, info.componentStack)
+
+    // Report to Sentry in production when the SDK is present.
+    if (!import.meta.env.DEV) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const Sentry = (window as any).__SENTRY__
+        if (Sentry?.captureException) {
+          Sentry.captureException(error, { extra: { componentStack: info.componentStack } })
+        }
+      } catch {
+        // Never let error reporting itself crash the boundary.
+      }
     }
   }
 

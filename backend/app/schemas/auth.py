@@ -30,7 +30,7 @@ class LoginRequest(BaseModel):
     """Request body for tenant login."""
 
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class AuthResponse(BaseModel):

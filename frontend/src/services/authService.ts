@@ -51,7 +51,7 @@ export async function confirmPasswordReset(
 export async function refreshTokenRequest(refreshToken: string): Promise<AuthResponse> {
   const response = await apiClient.post<AuthResponse>("/auth/refresh", {
     refresh_token: refreshToken,
-  }, { _skipProactiveRefresh: true } as object)
+  }, { _skipProactiveRefresh: true, _retry: true } as object)
   return response.data
 }
 
@@ -59,7 +59,7 @@ export async function logoutRequest(refreshToken: string | null = null): Promise
   await apiClient.post(
     "/auth/logout",
     refreshToken ? { refresh_token: refreshToken } : undefined,
-    { _skipProactiveRefresh: true } as object,
+    { _skipProactiveRefresh: true, _retry: true } as object,
   )
 }
 

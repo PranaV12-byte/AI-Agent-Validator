@@ -100,7 +100,14 @@ let policyConfigState = {
 
 const signupHandler = http.post("*/api/v1/auth/signup", () => {
   return HttpResponse.json(
-    { access_token: MOCK_JWT, token_type: "bearer", api_key: "sk-mock", refresh_token: "mock-refresh-token" },
+    {
+      access_token: MOCK_JWT,
+      token_type: "bearer",
+      api_key: "sk-mock",
+      refresh_token: "mock-refresh-token",
+      email_verified: true,
+      verification_url: null,
+    },
     { status: 201 },
   )
 })
@@ -145,6 +152,23 @@ const resetPasswordHandler = http.post("*/api/v1/auth/reset-password", async ({ 
     return HttpResponse.json({ message: "Password updated successfully." })
   }
   return HttpResponse.json({ detail: "Invalid or expired reset token." }, { status: 400 })
+})
+
+const verifyEmailHandler = http.post("*/api/v1/auth/verify-email", async ({ request }) => {
+  const body = (await request.json()) as { token?: string }
+  if (body.token === "mock-verify-token") {
+    return HttpResponse.json({ message: "Email verified successfully. You can now sign in." })
+  }
+  if (body.token === "already-verified-token") {
+    return HttpResponse.json({ message: "Email already verified." })
+  }
+  return HttpResponse.json({ detail: "Invalid or expired verification link." }, { status: 400 })
+})
+
+const resendVerificationHandler = http.post("*/api/v1/auth/resend-verification", () => {
+  return HttpResponse.json({
+    message: "If that email is registered and unverified, a new link has been sent.",
+  })
 })
 
 const profileHandler = http.get("*/api/v1/auth/me", () => {
@@ -210,6 +234,8 @@ export const handlers = [
   logoutHandler,
   forgotPasswordHandler,
   resetPasswordHandler,
+  verifyEmailHandler,
+  resendVerificationHandler,
   profileHandler,
   dashboardStatsHandler,
   auditHandler,
@@ -225,6 +251,8 @@ export const mockHandlers = {
   logout: logoutHandler,
   forgotPassword: forgotPasswordHandler,
   resetPassword: resetPasswordHandler,
+  verifyEmail: verifyEmailHandler,
+  resendVerification: resendVerificationHandler,
   profile: profileHandler,
   dashboardStats: dashboardStatsHandler,
   audit: auditHandler,
