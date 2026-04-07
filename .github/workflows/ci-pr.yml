@@ -54,7 +54,7 @@ jobs:
           echo "::add-mask::${{ secrets.CI_JWT_SECRET }}"
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
@@ -170,7 +170,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
