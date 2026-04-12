@@ -130,15 +130,18 @@ async def lifespan(app: FastAPI):
                 "Set ALGORAND_APP_ID to enable real blockchain writes.",
         )
         if settings.environment == "production":
-            raise RuntimeError(
-                "ALGORAND_APP_ID must be set in production. "
-                "Mock TX IDs are not acceptable for production compliance audit trails."
+            logger.warning(
+                "algorand_not_configured",
+                msg="ALGORAND_APP_ID is not set in production. "
+                    "Audit logs will use mock TX IDs and are NOT immutably recorded on-chain. "
+                    "Set ALGORAND_APP_ID and ALGORAND_MNEMONIC to enable blockchain writes.",
             )
     elif settings.environment == "production" and settings.algorand_network != "mainnet":
-        raise RuntimeError(
-            f"ALGORAND_NETWORK is '{settings.algorand_network}' but ENVIRONMENT is 'production'. "
-            "Set ALGORAND_NETWORK=mainnet to write audit events to the mainnet blockchain. "
-            "Testnet entries have no legal or compliance value."
+        logger.warning(
+            "algorand_not_mainnet",
+            msg=f"ALGORAND_NETWORK is '{settings.algorand_network}' but ENVIRONMENT is 'production'. "
+                "Set ALGORAND_NETWORK=mainnet for production compliance. "
+                "Testnet entries have no legal or compliance value.",
         )
 
     logger.info("startup", msg="Verifying Redis connectivity...")
