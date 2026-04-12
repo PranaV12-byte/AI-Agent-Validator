@@ -29,8 +29,9 @@ if config.config_file_name is not None:
 
 # ── App settings: override alembic.ini URL with real value from .env ───────────
 from app.config import settings  # noqa: E402
+from app.database import _clean_url, _connect_args  # noqa: E402
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", _clean_url)
 
 # ── Model metadata: import Base + all models so autogenerate sees every table ──
 from app.database import Base  # noqa: E402
@@ -81,6 +82,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=_connect_args,
     )
     async with connectable.connect() as connection:
         # pg_advisory_lock is session-scoped — it persists across transactions,
