@@ -91,7 +91,7 @@ apiClient.interceptors.request.use(async (config) => {
 
   // Skip proactive refresh for requests that are themselves part of the refresh flow
   // to prevent a circular deadlock: refresh request → interceptor → ensureRefresh() → same refreshPromise
-  const skip = (config as Record<string, unknown>)._skipProactiveRefresh
+  const skip = (config as unknown as Record<string, unknown>)._skipProactiveRefresh
 
   if (!skip && accessToken && refreshHandler) {
     const exp = getTokenExpiry(accessToken)
