@@ -32,7 +32,7 @@ dependencies = [
     "spacy>=3.8.0",
     # Algorand
     "algokit-utils>=3.0.0",
-    "py-algorand-sdk>=2.6.0",
+    "py-algorand-sdk>=2.11.1",
 ]
 
 [project.optional-dependencies]
