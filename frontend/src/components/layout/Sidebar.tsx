@@ -8,7 +8,7 @@ import {
   User,
 } from "lucide-react"
 import type { ComponentType } from "react"
-import { NavLink, useNavigate } from "react-router-dom"
+import { NavLink } from "react-router-dom"
 
 import { useAuth } from "../../hooks/useAuth"
 
@@ -28,11 +28,11 @@ const navItems: NavItem[] = [
 ]
 
 function Sidebar() {
-  const { user } = useAuth()
-  const navigate = useNavigate()
+  const { user, logout } = useAuth()
 
   function handleLogout() {
-    navigate("/login?logout=1", { replace: true })
+    logout()
+    window.location.replace("/login?logout=1")
   }
 
   return (
