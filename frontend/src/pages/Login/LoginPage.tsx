@@ -121,9 +121,18 @@ function LoginPage() {
           </div>
 
           {error ? (
-            <p className="text-sm text-brand-red bg-brand-red/10 border border-brand-red/30 rounded-lg px-3 py-2">
-              {error}
-            </p>
+            <div className="text-sm text-brand-red bg-brand-red/10 border border-brand-red/30 rounded-lg px-3 py-2">
+              <span>{error}</span>
+              {error.toLowerCase().includes("not verified") ? (
+                <button
+                  type="button"
+                  onClick={() => navigate("/verify-email")}
+                  className="ml-1 underline text-brand-green"
+                >
+                  Resend verification link →
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           <button
