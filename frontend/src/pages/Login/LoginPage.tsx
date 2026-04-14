@@ -1,13 +1,13 @@
 import { Eye, EyeOff, ShieldCheck } from "lucide-react"
 import type { FormEvent } from "react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { useAuth } from "../../hooks/useAuth"
 import { getErrorMessage } from "../../services/apiClient"
 
 function LoginPage() {
-  const { login } = useAuth()
+  const { login, logout } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -19,6 +19,10 @@ function LoginPage() {
   const justSignedUp = searchParams.get("signup") === "1"
   const justReset = searchParams.get("reset") === "1"
   const justLoggedOut = searchParams.get("logout") === "1"
+
+  useEffect(() => {
+    if (justLoggedOut) logout()
+  }, [justLoggedOut, logout])
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")

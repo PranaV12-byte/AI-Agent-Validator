@@ -28,12 +28,11 @@ const navItems: NavItem[] = [
 ]
 
 function Sidebar() {
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
 
   function handleLogout() {
     navigate("/login?logout=1", { replace: true })
-    logout()
   }
 
   return (
