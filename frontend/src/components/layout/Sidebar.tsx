@@ -32,8 +32,8 @@ function Sidebar() {
   const navigate = useNavigate()
 
   function handleLogout() {
+    navigate("/login?logout=1", { replace: true })
     logout()
-    navigate("/login?logout=1")
   }
 
   return (

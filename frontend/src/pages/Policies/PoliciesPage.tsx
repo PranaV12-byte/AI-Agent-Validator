@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import type { Policy, PolicyCreatePayload } from "../../types/api"
@@ -22,6 +22,7 @@ function PoliciesPage() {
   const [isBuilderOpen, setIsBuilderOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
+  const savingRef = useRef(false)
   const [policyToDelete, setPolicyToDelete] = useState<Policy | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -45,6 +46,8 @@ function PoliciesPage() {
   }, [loadPolicies])
 
   async function handleSave(payload: PolicyCreatePayload) {
+    if (savingRef.current) return
+    savingRef.current = true
     setIsSaving(true)
 
     try {
@@ -62,6 +65,7 @@ function PoliciesPage() {
     } catch {
       toast.error("Could not save policy")
     } finally {
+      savingRef.current = false
       setIsSaving(false)
     }
   }

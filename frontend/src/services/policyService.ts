@@ -12,7 +12,9 @@ export async function fetchPolicies(): Promise<PolicyListResponse> {
 }
 
 export async function createPolicy(payload: PolicyCreatePayload): Promise<Policy> {
-  const response = await apiClient.post<Policy>("/policies/", payload)
+  const response = await apiClient.post<Policy>("/policies/", payload, {
+    timeout: 60000,
+  })
   return response.data
 }
 
@@ -20,7 +22,9 @@ export async function updatePolicy(
   policyId: string,
   payload: PolicyUpdatePayload,
 ): Promise<Policy> {
-  const response = await apiClient.put<Policy>(`/policies/${policyId}`, payload)
+  const response = await apiClient.put<Policy>(`/policies/${policyId}`, payload, {
+    timeout: 60000,
+  })
   return response.data
 }
 
