@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -122,6 +122,79 @@ describe("foundation primitives", () => {
 })
 
 describe("development foundation preview", () => {
+  it("collapses the desktop sidebar to an accessible icon rail and expands it again", async () => {
+    const user = userEvent.setup()
+    const { container } = render(<FoundationPreviewPage />)
+    const collapse = screen.getByRole("button", { name: "Collapse sidebar" })
+    expect(collapse).toHaveAttribute("aria-expanded", "true")
+    expect(collapse).toHaveAttribute("aria-controls", "preview-sidebar-menu")
+    expect(screen.getByRole("link", { name: "Test" })).toHaveAttribute("aria-current", "page")
+
+    await user.click(collapse)
+    const expand = screen.getByRole("button", { name: "Expand sidebar" })
+    expect(expand).toHaveAttribute("aria-expanded", "false")
+    expect(container.querySelector(".fd-sidebar")).toHaveClass("fd-sidebar--collapsed")
+    const protectionLink = screen.getByRole("link", { name: "Protection" })
+    expect(protectionLink).toHaveAttribute("aria-label", "Protection")
+    expect(protectionLink).toHaveAttribute("title", "Protection")
+    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute("aria-disabled", "true")
+    fireEvent.mouseEnter(protectionLink)
+    fireEvent.mouseLeave(protectionLink)
+    fireEvent.focus(protectionLink)
+    const tooltip = screen.getByRole("tooltip")
+    expect(tooltip).toHaveTextContent("Protection")
+    expect(protectionLink).toHaveAttribute("aria-describedby", tooltip.id)
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 260)) })
+    expect(screen.getByRole("tooltip")).toBeVisible()
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Account settings" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Help & feedback" })).toBeInTheDocument()
+
+    await user.click(expand)
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute("aria-expanded", "true")
+    expect(container.querySelector(".fd-sidebar")).not.toHaveClass("fd-sidebar--collapsed")
+  })
+
+  it("closes mobile navigation on Escape and returns focus to its disclosure control", async () => {
+    const user = userEvent.setup()
+    const { container } = render(<FoundationPreviewPage />)
+    const mobileToggle = container.querySelector<HTMLButtonElement>(".fd-mobile-toggle")
+    expect(mobileToggle).toHaveAttribute("aria-label", "Open preview navigation")
+    expect(mobileToggle).toHaveAttribute("aria-expanded", "false")
+    expect(mobileToggle).toHaveAttribute("aria-controls", "preview-sidebar-menu")
+
+    fireEvent.click(mobileToggle!)
+    expect(mobileToggle).toHaveAttribute("aria-label", "Close preview navigation")
+    expect(mobileToggle).toHaveAttribute("aria-expanded", "true")
+    mobileToggle!.focus()
+    fireEvent.keyDown(document, { key: "Escape" })
+    await waitFor(() => expect(mobileToggle).toHaveFocus())
+    expect(mobileToggle).toHaveAttribute("aria-expanded", "false")
+
+    await user.click(mobileToggle!)
+    expect(mobileToggle).toHaveAttribute("aria-expanded", "true")
+    const protectionLink = screen.getByRole("link", { name: "Protection" })
+    protectionLink.focus()
+    fireEvent.keyDown(document, { key: "Escape" })
+    await waitFor(() => expect(mobileToggle).toHaveFocus())
+    expect(mobileToggle).toHaveAttribute("aria-expanded", "false")
+
+    await user.click(mobileToggle!)
+    const desktopWidth = window.innerWidth
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+    try {
+      fireEvent.click(protectionLink)
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: desktopWidth })
+    }
+    expect(mobileToggle).toHaveAttribute("aria-expanded", "false")
+    expect(window.location.hash).toBe("#protection-preview")
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Protection rule modal" })).toHaveFocus())
+    window.history.replaceState({}, "", "/")
+  })
+
   it("keeps examples local, actions honest, and nonsensitive profile drafts across tabs", async () => {
     const user = userEvent.setup()
     render(<FoundationPreviewPage />)

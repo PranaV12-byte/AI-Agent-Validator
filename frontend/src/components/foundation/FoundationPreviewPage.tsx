@@ -1,11 +1,13 @@
 import { useCallback, useState } from "react"
 import { FrameLogo } from "./FrameLogo"
+import { FoundationSidebar } from "./FoundationSidebar"
 import { Button, Card, Modal, StatusBadge, Tabs, TextArea, TextInput } from "./Primitives"
 import "./foundation.css"
 import "./preview.css"
 
 export default function FoundationPreviewPage() {
   const [ruleOpen, setRuleOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [company, setCompany] = useState("Example Studio")
   const [email, setEmail] = useState("alex@example.com")
   const [prompt, setPrompt] = useState("Summarize the public launch announcement for our sample workspace.")
@@ -44,20 +46,8 @@ export default function FoundationPreviewPage() {
 
   return (
     <div className="foundation-preview">
-      <div className="fd-shell" data-modal-background="true">
-        <aside className="fd-sidebar">
-          <a className="fd-brand" href="#test-preview" aria-label="SafeBot preview home"><FrameLogo size={28} /></a>
-          <nav aria-label="Preview navigation" className="fd-nav">
-            <a aria-current="page" className="fd-nav__link" href="#test-preview">Test</a>
-            <a className="fd-nav__link" href="#protection-preview">Protection</a>
-            <span aria-disabled="true" className="fd-nav__item">Activity</span>
-            <span aria-disabled="true" className="fd-nav__item">Connect</span>
-          </nav>
-          <nav aria-label="More preview links" className="fd-sidebar__bottom">
-            <a className="fd-nav__link" href="#account-preview">Account settings</a>
-            <a className="fd-nav__link" href="#preview-boundary">Help &amp; feedback</a>
-          </nav>
-        </aside>
+      <div className={"fd-shell" + (sidebarCollapsed ? " fd-shell--collapsed" : "")} data-modal-background="true">
+        <FoundationSidebar onCollapsedChange={setSidebarCollapsed} />
 
         <main className="fd-main">
           <div className="fd-main__inner">

@@ -1,4 +1,5 @@
 import {
+  forwardRef,
   useEffect,
   useId,
   useRef,
@@ -13,9 +14,12 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "subtle"
 }
 
-export function Button({ variant = "primary", className = "", type = "button", ...props }: ButtonProps) {
-  return <button className={"fd-button fd-button--" + variant + (className ? " " + className : "")} type={type} {...props} />
-}
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = "primary", className = "", type = "button", ...props },
+  ref,
+) {
+  return <button className={"fd-button fd-button--" + variant + (className ? " " + className : "")} ref={ref} type={type} {...props} />
+})
 
 export function Card({ children, padded = false, className = "" }: { children: ReactNode; padded?: boolean; className?: string }) {
   return <section className={"fd-card" + (padded ? " fd-card--padded" : "") + (className ? " " + className : "")}>{children}</section>
