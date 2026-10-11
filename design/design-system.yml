@@ -1,0 +1,37 @@
+mode: full
+global_profile_version: not-recorded-in-this-worktree
+source_of_truth:
+  tokens: frontend/src/components/foundation/foundation.css
+  components: frontend/src/components/foundation
+  visual_direction: docs/DESIGN.md
+scope:
+  - development-only foundation preview
+  - future UI slices after owner review
+  - legacy routes are not recolored by these tokens
+external_visual_references:
+  source_directory: "C:/Dev/Projects/AI Agent Validater/design/mockups/2026-10-11"
+  tracked_in_this_worktree: false
+  copied_into_release: false
+  files:
+    - name: 03-test-core.png
+      sha256: 0EED179A7E6428BBD0099BE555A57A582AC408FD47B353DBEB3C4D37AE80AED8
+    - name: 13-rule-modal-v2.png
+      sha256: B178846CA1A645BC1A892CFF5823C03F385326593E1A032D63FF07F629EF3B56
+    - name: 19a-profile-v2.png
+      sha256: 14DF4E591E5EC77FC5646DF6C07839B90059B56DAEA6AB1126AED958DF0FC642
+    - name: 19b-security-v2.png
+      sha256: 7673B39910C75E3D85C3A7874787B124C26667F3AB19FF3E1444CC6E7F570706
+review_requirements:
+  - compare against the accepted image at the same state and viewport
+  - inspect keyboard focus and narrow layouts
+  - keep development preview data synthetic and actions explicit
+  - owner review before implementing another screen
+review_evidence:
+  unit_test: frontend/src/components/foundation/foundation.test.tsx
+  browser_test: frontend/e2e/foundation-preview.spec.ts
+  generated_screenshots: frontend/test-results/foundation
+  viewports:
+    - 1440x900
+    - 390x480 modal-scroll
+    - 390x844
+    - 320x844

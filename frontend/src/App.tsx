@@ -26,6 +26,9 @@ const PoliciesPage = lazy(() => import("./pages/Policies/PoliciesPage"))
 const SettingsPage = lazy(() => import("./pages/Settings/SettingsPage"))
 const IntegrationPage = lazy(() => import("./pages/Integration/IntegrationPage"))
 const AccountPage = lazy(() => import("./pages/Account/AccountPage"))
+const FoundationPreviewPage = import.meta.env.DEV
+  ? lazy(() => import("./components/foundation/FoundationPreviewPage"))
+  : null
 
 function LandingOrDashboard() {
   const { isAuthenticated, isHydrated, isLoading } = useAuth()
@@ -64,6 +67,9 @@ function App() {
       />
       <Suspense fallback={<div className="h-full bg-dashboard-bg" />}>
         <Routes>
+          {FoundationPreviewPage && (
+            <Route path="/__ui/foundation" element={<FoundationPreviewPage />} />
+          )}
           <Route path="/" element={<LandingOrDashboard />} />
           <Route
             path="/login"

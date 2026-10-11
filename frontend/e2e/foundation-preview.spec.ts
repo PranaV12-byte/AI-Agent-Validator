@@ -1,0 +1,90 @@
+import { mkdirSync } from "node:fs"
+import { resolve } from "node:path"
+import { expect, test } from "@playwright/test"
+
+test("dev foundation preview stays truthful, accessible, and responsive", async ({ page }) => {
+  const evidenceDirectory = resolve("test-results/foundation")
+  mkdirSync(evidenceDirectory, { recursive: true })
+
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/__ui/foundation")
+  await page.evaluate(() => document.fonts.ready.then(() => true))
+  await expect(page.getByRole("heading", { name: "Test a prompt" })).toBeVisible()
+  await expect(page.getByText("Development-only component preview")).toBeVisible()
+  await expect(page.getByRole("navigation", { name: "Preview navigation" }).getByText("Test")).toHaveAttribute("aria-current", "page")
+  await expect(page.getByRole("button", { name: "Run check" }).first()).toBeDisabled()
+  await expect(page.getByText("No check has run. This preview does not send prompts or produce safety results.")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Help & feedback" })).toBeInViewport()
+
+  await page.locator(".fd-test-card").screenshot({ path: resolve(evidenceDirectory, "test-card-desktop.png"), animations: "disabled" })
+  await page.locator(".fd-logo-samples").scrollIntoViewIfNeeded()
+  await page.locator(".fd-logo-samples").screenshot({ path: resolve(evidenceDirectory, "frame-sizes.png"), animations: "disabled" })
+  for (const size of [24, 32, 64]) {
+    const sample = page.getByTestId("logo-size-" + size)
+    await expect(sample.locator("svg")).toHaveAttribute("width", String(size))
+    await expect(sample.locator("svg")).toHaveAttribute("data-internal-gap", "2")
+  }
+
+  await page.locator("#protection-preview").scrollIntoViewIfNeeded()
+  const modalTrigger = page.getByRole("button", { name: "Open rule modal preview" })
+  await modalTrigger.click()
+  let dialog = page.getByRole("dialog", { name: "Add protection rule" })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Close dialog" })).toBeFocused()
+  await expect(page.locator(".fd-shell")).toHaveAttribute("inert", "")
+  await expect(page.locator(".fd-shell")).toHaveAttribute("aria-hidden", "true")
+  await expect(page.locator("body")).toHaveCSS("overflow", "hidden")
+  await page.screenshot({ path: resolve(evidenceDirectory, "rule-modal-desktop.png"), animations: "disabled" })
+  await page.keyboard.press("Shift+Tab")
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(dialog.getByRole("button", { name: "Close dialog" })).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(dialog).toBeHidden()
+  await expect(modalTrigger).toBeFocused()
+  await expect(page.locator(".fd-shell")).not.toHaveAttribute("inert")
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden")
+
+  await page.locator("#account-preview").scrollIntoViewIfNeeded()
+  const accountCard = page.getByRole("heading", { name: "Account tabs" }).locator("xpath=ancestor::section[1]")
+  await accountCard.screenshot({ path: resolve(evidenceDirectory, "profile-tab.png"), animations: "disabled" })
+  await page.getByRole("tab", { name: "Security" }).click()
+  await expect(page.getByRole("tabpanel").getByLabel("New password")).toHaveValue("")
+  await accountCard.screenshot({ path: resolve(evidenceDirectory, "security-tab.png"), animations: "disabled" })
+  await page.getByRole("tab", { name: "Profile" }).click()
+  await page.getByLabel("Workspace name").fill("Synthetic Draft Studio")
+  await page.getByRole("tab").filter({ hasText: "Security" }).focus()
+  await page.keyboard.press("ArrowRight")
+  await expect(page.getByRole("tab", { name: "Profile" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByLabel("Workspace name")).toHaveValue("Synthetic Draft Studio")
+
+  await page.setViewportSize({ width: 390, height: 480 })
+  await page.getByRole("button", { name: "Open rule modal preview" }).click()
+  dialog = page.getByRole("dialog", { name: "Add protection rule" })
+  const longSample = Array.from({ length: 16 }, (_, index) => "Synthetic example paragraph " + (index + 1) + ".").join("\n")
+  await dialog.getByRole("textbox", { name: "Example description" }).fill(longSample)
+  const modalScrolls = await dialog.evaluate((element) => element.scrollHeight > element.clientHeight)
+  expect(modalScrolls).toBe(true)
+  await dialog.evaluate((element) => { element.scrollTop = element.scrollHeight })
+  await expect(dialog).toBeInViewport()
+  await page.screenshot({ path: resolve(evidenceDirectory, "rule-modal-mobile-scroll.png") })
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("button", { name: "Open rule modal preview" })).toBeFocused()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await expect(page.getByRole("heading", { name: "Test a prompt" })).toBeVisible()
+  await page.screenshot({ path: resolve(evidenceDirectory, "test-mobile-390.png"), animations: "disabled" })
+  await page.setViewportSize({ width: 320, height: 844 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  const pageWidths = await page.evaluate(() => ({
+    document: document.documentElement.scrollWidth,
+    viewport: window.innerWidth,
+  }))
+  expect(pageWidths.document).toBeLessThanOrEqual(pageWidths.viewport)
+  await page.screenshot({ path: resolve(evidenceDirectory, "test-mobile-320.png"), animations: "disabled" })
+
+  await page.goto("/dashboard")
+  await expect(page).toHaveURL(/\/login(?:\?|$)/)
+})
