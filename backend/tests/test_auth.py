@@ -50,6 +50,14 @@ def test_regenerate_key_invalidates_old_key_and_returns_new_raw_key(client: Test
     token = auth["access_token"]
     old_api_key = auth["api_key"]
 
+    # Populate the verification cache before rotating the key.
+    warmed_old_key = client.post(
+        "/api/v1/hooks/sanitize",
+        headers={"X-API-Key": old_api_key},
+        json={"message": "safe text", "session_id": "warm-old-key"},
+    )
+    assert warmed_old_key.status_code == 200
+
     regenerate_response = client.post(
         "/api/v1/auth/regenerate-key",
         headers={"Authorization": f"Bearer {token}"},

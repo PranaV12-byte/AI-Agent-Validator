@@ -19,6 +19,7 @@ function LoginPage() {
   const justSignedUp = searchParams.get("signup") === "1"
   const justReset = searchParams.get("reset") === "1"
   const justLoggedOut = searchParams.get("logout") === "1"
+  const emailVerificationPending = searchParams.get("verification") === "pending"
 
   useEffect(() => {
     if (justLoggedOut) logout()
@@ -73,6 +74,16 @@ function LoginPage() {
         {justLoggedOut ? (
           <p className="text-sm text-brand-green bg-brand-green/10 border border-brand-green/30 rounded-lg px-3 py-2 mb-6">
             Signed out successfully. See you next time!
+          </p>
+        ) : null}
+
+        {emailVerificationPending ? (
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-sm text-brand-green bg-brand-green/10 border border-brand-green/30 rounded-lg px-3 py-2 mb-6"
+          >
+            Your email update was saved. Verify your new address using the link sent to your inbox, then sign in.
           </p>
         ) : null}
 

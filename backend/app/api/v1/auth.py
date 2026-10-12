@@ -1,6 +1,7 @@
 """Authentication endpoints for tenant signup and login."""
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import secrets
 from uuid import UUID
@@ -11,8 +12,9 @@ import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.config import settings
 from app.core.rate_limit import limiter
@@ -65,13 +67,74 @@ def _hash_api_key(api_key: str) -> str:
     return bcrypt.hashpw(api_key.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
+async def _increment_auth_version(db: AsyncSession, tenant: Tenant) -> int:
+    """Atomically advance the persisted version so concurrent mutations cannot lose an increment."""
+    result = await db.execute(
+        update(Tenant)
+        .where(Tenant.id == tenant.id)
+        .values(auth_version=Tenant.auth_version + 1)
+        .returning(Tenant.auth_version)
+        .execution_options(synchronize_session=False)
+    )
+    auth_version = result.scalar_one_or_none()
+    if auth_version is None:
+        raise HTTPException(status_code=401, detail="Tenant not found or inactive")
+    version = int(auth_version)
+    set_committed_value(tenant, "auth_version", version)
+    return version
+
+
 _bearer_scheme = HTTPBearer(auto_error=False)
 _JWT_BLOCKLIST_PREFIX = "jwt_blocklist:"
 _REFRESH_TOKEN_PREFIX = "refresh_token:"
+_REFRESH_TOKEN_CONSUMED_PREFIX = "refresh_token_consumed:"
 _REFRESH_FAMILY_REVOKED_PREFIX = "refresh_family_revoked:"
 
 
-async def _create_refresh_token(tenant_id: str) -> tuple[str, str]:
+_CONSUME_REFRESH_TOKEN_SCRIPT = """
+local active = redis.call("GET", KEYS[1])
+if active then
+    redis.call("DEL", KEYS[1])
+    redis.call("SET", KEYS[2], active, "EX", ARGV[1])
+    return {1, active}
+end
+local consumed = redis.call("GET", KEYS[2])
+if consumed then
+    local decoded, metadata = pcall(cjson.decode, consumed)
+    if decoded and type(metadata) == "table" and metadata["family"] then
+        redis.call("SET", ARGV[2] .. metadata["family"], "1", "EX", ARGV[1])
+    end
+    return {2, consumed}
+end
+return {0, ""}
+"""
+
+
+async def _store_refresh_token(
+    token: str,
+    tenant_id: str,
+    family: str,
+    auth_version: int,
+) -> None:
+    redis = await get_redis()
+    ttl = max(1, settings.refresh_token_ttl_days * 86400)
+    await redis.setex(
+        f"{_REFRESH_TOKEN_PREFIX}{token}",
+        ttl,
+        json.dumps(
+            {
+                "tenant_id": tenant_id,
+                "family": family,
+                "auth_version": auth_version,
+            }
+        ),
+    )
+
+
+async def _create_refresh_token(
+    tenant_id: str,
+    auth_version: int = 0,
+) -> tuple[str, str]:
     """Generate an opaque refresh token and persist it in Redis.
 
     Returns (token, family). The family ID is used to detect replay attacks:
@@ -79,37 +142,81 @@ async def _create_refresh_token(tenant_id: str) -> tuple[str, str]:
     """
     token = secrets.token_urlsafe(settings.refresh_token_length)
     family = secrets.token_urlsafe(16)
-    redis = await get_redis()
-    ttl = settings.refresh_token_ttl_days * 86400
-    await redis.setex(
-        f"{_REFRESH_TOKEN_PREFIX}{token}",
-        ttl,
-        json.dumps({"tenant_id": tenant_id, "family": family}),
-    )
+    await _store_refresh_token(token, tenant_id, family, auth_version)
     return token, family
 
 
-async def _consume_refresh_token(token: str) -> tuple[str, str] | None:
-    """Atomically GET+DELETE a refresh token from Redis.
+async def _consume_refresh_token(token: str) -> tuple[str, str, int] | None:
+    """Consume a refresh token once and retain a hashed replay marker.
 
-    Returns (tenant_id, family) if valid, None if missing/expired.
+    The Lua script makes consuming the token and recording its family metadata
+    one Redis operation. Replaying a consumed token revokes its whole family.
     """
     redis = await get_redis()
-    key = f"{_REFRESH_TOKEN_PREFIX}{token}"
-    raw = await redis.getdel(key)
-    if raw is None:
+    token_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    active_key = f"{_REFRESH_TOKEN_PREFIX}{token}"
+    consumed_key = f"{_REFRESH_TOKEN_CONSUMED_PREFIX}{token_digest}"
+    ttl = max(1, settings.refresh_token_ttl_days * 86400)
+    result = await redis.eval(
+        _CONSUME_REFRESH_TOKEN_SCRIPT,
+        2,
+        active_key,
+        consumed_key,
+        ttl,
+        _REFRESH_FAMILY_REVOKED_PREFIX,
+    )
+    if not result:
         return None
+
     try:
+        result_status = int(result[0])
+        raw = result[1]
+        if result_status == 0 or raw in (None, ""):
+            return None
         data = json.loads(raw)
-        return data["tenant_id"], data["family"]
-    except (json.JSONDecodeError, KeyError):
+        tenant_id = data["tenant_id"]
+        family = data["family"]
+        auth_version = data.get("auth_version", 0)
+        if (
+            result_status not in (1, 2)
+            or not isinstance(tenant_id, str)
+            or not isinstance(family, str)
+            or not family
+            or isinstance(auth_version, bool)
+            or not isinstance(auth_version, int)
+            or auth_version < 0
+        ):
+            return None
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
         return None
+
+    if result_status == 2:
+        logger.warning("auth.refresh_replay_detected", tenant_id=tenant_id)
+        return None
+
+    return tenant_id, family, auth_version
+
+
+async def _create_email_verification_url(tenant: Tenant) -> str:
+    verify_token = secrets.token_urlsafe(32)
+    redis = await get_redis()
+    await redis.setex(
+        f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
+        settings.email_verification_token_ttl_seconds,
+        json.dumps(
+            {
+                "tenant_id": str(tenant.id),
+                "auth_version": int(tenant.auth_version or 0),
+            }
+        ),
+    )
+    return f"{settings.frontend_url}/verify-email?token={verify_token}"
 
 
 async def _revoke_refresh_family(family: str) -> None:
     """Mark a refresh token family as revoked in Redis."""
     redis = await get_redis()
-    ttl = settings.refresh_token_ttl_days * 86400
+    ttl = max(1, settings.refresh_token_ttl_days * 86400)
     await redis.setex(f"{_REFRESH_FAMILY_REVOKED_PREFIX}{family}", ttl, "1")
 
 
@@ -120,36 +227,11 @@ async def _is_family_revoked(family: str) -> bool:
     return result is not None
 
 
-async def _revoke_all_sessions_for_tenant(tenant_id: str) -> None:
-    """Revoke all refresh tokens belonging to a tenant.
-
-    Scans Redis for refresh tokens associated with the tenant_id,
-    revokes each token's family, then deletes the token key.
-    """
-    redis = await get_redis()
-    cursor: int | str = 0
-    while True:
-        cursor, keys = await redis.scan(
-            cursor, match=f"{_REFRESH_TOKEN_PREFIX}*", count=100
-        )
-        for key in keys:
-            raw = await redis.get(key)
-            if raw is None:
-                continue
-            try:
-                data = json.loads(raw)
-                if data.get("tenant_id") == tenant_id:
-                    family = data.get("family")
-                    if family:
-                        await _revoke_refresh_family(family)
-                    await redis.delete(key)
-            except (json.JSONDecodeError, KeyError):
-                pass
-        if cursor == 0:
-            break
-
-
-def _create_access_token(tenant_id: str) -> str:
+def _create_access_token(
+    tenant_id: str,
+    auth_version: int = 0,
+    session_family: str | None = None,
+) -> str:
     """Issue JWT access token for a tenant."""
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=settings.jwt_expire_minutes)
@@ -158,7 +240,10 @@ def _create_access_token(tenant_id: str) -> str:
         "exp": int(expires_at.timestamp()),
         "iat": int(now.timestamp()),
         "jti": secrets.token_urlsafe(16),  # unique token ID for revocation
+        "auth_version": auth_version,
     }
+    if session_family is not None:
+        payload["session_family"] = session_family
     return jwt.encode(
         payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
     )
@@ -204,33 +289,20 @@ async def signup(
 
     verification_url_in_response: str | None = None
     if not auto_verified:
-        verify_token = secrets.token_urlsafe(32)
-        redis = await get_redis()
-        await redis.setex(
-            f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
-            settings.email_verification_token_ttl_seconds,
-            str(tenant.id),
-        )
-        verify_url = f"{settings.frontend_url}/verify-email?token={verify_token}"
-        logger.info("email_verification_token_created", email=body.email, verify_url=verify_url)
+        verify_url = await _create_email_verification_url(tenant)
+        logger.info("email_verification_token_created", tenant_id=str(tenant.id))
         await send_verification_email(body.email, verify_url)
         # Never expose the token URL in production responses
         verification_url_in_response = None
     else:
         # Expose in dev/test so devs can skip the email step
-        verify_token = secrets.token_urlsafe(32)
-        redis = await get_redis()
-        await redis.setex(
-            f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
-            settings.email_verification_token_ttl_seconds,
-            str(tenant.id),
-        )
-        verify_url = f"{settings.frontend_url}/verify-email?token={verify_token}"
-        logger.info("email_verification_token_created", email=body.email, verify_url=verify_url)
+        verify_url = await _create_email_verification_url(tenant)
+        logger.info("email_verification_token_created", tenant_id=str(tenant.id))
         verification_url_in_response = verify_url
 
-    token = _create_access_token(str(tenant.id))
-    refresh_token, _ = await _create_refresh_token(str(tenant.id))
+    auth_version = int(tenant.auth_version or 0)
+    refresh_token, family = await _create_refresh_token(str(tenant.id), auth_version)
+    token = _create_access_token(str(tenant.id), auth_version, family)
     return AuthResponse(
         access_token=token,
         api_key=raw_api_key,
@@ -267,8 +339,9 @@ async def login(
         )
 
     logger.info("auth.login_success", tenant_id=str(tenant.id))
-    token = _create_access_token(str(tenant.id))
-    refresh_token, _ = await _create_refresh_token(str(tenant.id))
+    auth_version = int(tenant.auth_version or 0)
+    refresh_token, family = await _create_refresh_token(str(tenant.id), auth_version)
+    token = _create_access_token(str(tenant.id), auth_version, family)
     return AuthResponse(access_token=token, refresh_token=refresh_token)
 
 
@@ -289,26 +362,28 @@ async def refresh(
     if result is None:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
-    tenant_id, family = result
+    tenant_id, family, token_auth_version = result
 
     if await _is_family_revoked(family):
-        logger.warning("auth.refresh_replay_detected", tenant_id=tenant_id, family=family)
+        logger.warning("auth.refresh_replay_detected", tenant_id=tenant_id)
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
     db_result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = db_result.scalar_one_or_none()
-    if tenant is None or not cast(bool, tenant.is_active):
+    if (
+        tenant is None
+        or not cast(bool, tenant.is_active)
+        or token_auth_version != int(tenant.auth_version or 0)
+    ):
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
     # Issue a new token pair within the same family
-    new_access_token = _create_access_token(str(tenant.id))
+    new_access_token = _create_access_token(
+        str(tenant.id), int(tenant.auth_version or 0), family
+    )
     new_refresh_token = secrets.token_urlsafe(settings.refresh_token_length)
-    redis = await get_redis()
-    ttl = settings.refresh_token_ttl_days * 86400
-    await redis.setex(
-        f"{_REFRESH_TOKEN_PREFIX}{new_refresh_token}",
-        ttl,
-        json.dumps({"tenant_id": tenant_id, "family": family}),
+    await _store_refresh_token(
+        new_refresh_token, tenant_id, family, int(tenant.auth_version or 0)
     )
 
     logger.info("auth.token_refreshed", tenant_id=tenant_id)
@@ -343,7 +418,7 @@ async def logout(
     if body and body.refresh_token:
         result = await _consume_refresh_token(body.refresh_token)
         if result:
-            _, family = result
+            _, family, _ = result
             await _revoke_refresh_family(family)
 
     return {"message": "Logged out."}
@@ -370,6 +445,7 @@ async def update_me(
     db: AsyncSession = Depends(get_db),
 ) -> TenantProfileResponse:
     """Update current tenant's company name or email."""
+    verification_url: str | None = None
     if body.company_name is not None:
         tenant.company_name = body.company_name
 
@@ -384,23 +460,13 @@ async def update_me(
             raise HTTPException(status_code=409, detail="Email already registered.")
         tenant.email = body.email
         tenant.email_verified = False
-
-        verify_token = secrets.token_urlsafe(32)
-        redis = await get_redis()
-        await redis.setex(
-            f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
-            settings.email_verification_token_ttl_seconds,
-            str(tenant.id),
-        )
-        verify_url = f"{settings.frontend_url}/verify-email?token={verify_token}"
-        logger.info("email_verification_token_created", email=body.email, verify_url=verify_url)
+        await _increment_auth_version(db, tenant)
+        verify_url = await _create_email_verification_url(tenant)
+        logger.info("email_verification_token_created", tenant_id=str(tenant.id))
         if settings.environment not in ("development", "test"):
             await send_verification_email(body.email, verify_url)
-
-        # Revoke all existing sessions so the user must re-authenticate
-        # after verifying the new email. Prevents continued access with
-        # an unverified email if the account is compromised.
-        await _revoke_all_sessions_for_tenant(str(tenant.id))
+        else:
+            verification_url = verify_url
 
     await db.commit()
     await db.refresh(tenant)
@@ -411,6 +477,7 @@ async def update_me(
         email=cast(str, tenant.email),
         api_key_prefix=cast(str, tenant.api_key_prefix),
         active_policy_version=cast(int, tenant.active_policy_version),
+        verification_url=verification_url,
     )
 
 
@@ -429,7 +496,7 @@ async def regenerate_key(
     await db.flush()
     await db.commit()
 
-    logger.info("auth.api_key_regenerated", tenant_id=str(tenant.id), new_prefix=raw_api_key[:8])
+    logger.info("auth.api_key_regenerated", tenant_id=str(tenant.id))
     return RegenerateApiKeyResponse(
         api_key=raw_api_key,
         api_key_prefix=cast(str, tenant.api_key_prefix),
@@ -473,7 +540,7 @@ async def forgot_password(
     )
 
     reset_url = f"{settings.frontend_url}/reset-password?token={token}"
-    logger.info("password_reset_requested", email=body.email, reset_url=reset_url)
+    logger.info("password_reset_requested", tenant_id=str(tenant.id))
 
     # Always attempt to send the email — send_password_reset_email is a no-op
     # when SMTP is not configured (logs a warning instead).
@@ -511,11 +578,8 @@ async def reset_password(
         )
 
     tenant.password_hash = _hash_password(body.new_password)
+    await _increment_auth_version(db, tenant)
     await db.commit()
-
-    # Revoke all existing refresh token families so stolen tokens cannot
-    # be exchanged for new access tokens after the password changes.
-    await _revoke_all_sessions_for_tenant(str(tenant_id))
 
     logger.info("password_reset_completed", tenant_id=tenant_id)
     return {"message": "Password updated successfully."}
@@ -530,17 +594,37 @@ async def verify_email(
 ) -> dict:
     """Consume an email verification token and mark the tenant's email as verified."""
     redis = await get_redis()
-    tenant_id = await redis.getdel(f"{_EMAIL_VERIFY_PREFIX}{body.token}")
+    raw_verification = await redis.getdel(f"{_EMAIL_VERIFY_PREFIX}{body.token}")
 
-    if tenant_id is None:
+    if raw_verification is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification link.",
         )
 
+    try:
+        verification_data = json.loads(raw_verification)
+        if isinstance(verification_data, dict):
+            tenant_id = verification_data["tenant_id"]
+            token_auth_version = verification_data.get("auth_version", 0)
+        else:
+            tenant_id = raw_verification
+            token_auth_version = 0
+    except (json.JSONDecodeError, KeyError, TypeError):
+        # Legacy links stored only the tenant ID and remain valid until their
+        # existing TTL, unless the account has since changed its email.
+        tenant_id = raw_verification
+        token_auth_version = 0
+
     result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = result.scalar_one_or_none()
-    if tenant is None or not cast(bool, tenant.is_active):
+    if (
+        tenant is None
+        or not cast(bool, tenant.is_active)
+        or isinstance(token_auth_version, bool)
+        or not isinstance(token_auth_version, int)
+        or token_auth_version != int(tenant.auth_version or 0)
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification link.",
@@ -577,18 +661,14 @@ async def resend_verification(
     if tenant is None or cast(bool, tenant.email_verified):
         return {"message": generic_message}
 
-    verify_token = secrets.token_urlsafe(32)
-    redis = await get_redis()
-    await redis.setex(
-        f"{_EMAIL_VERIFY_PREFIX}{verify_token}",
-        settings.email_verification_token_ttl_seconds,
-        str(tenant.id),
-    )
-    verify_url = f"{settings.frontend_url}/verify-email?token={verify_token}"
-    logger.info("email_verification_resent", email=body.email, verify_url=verify_url)
+    verify_url = await _create_email_verification_url(tenant)
+    logger.info("email_verification_resent", tenant_id=str(tenant.id))
     await send_verification_email(body.email, verify_url)
 
-    return {"message": generic_message}
+    response = {"message": generic_message}
+    if settings.environment in ("development", "test"):
+        response["verification_url"] = verify_url
+    return response
 
 
 @router.post("/change-password", status_code=status.HTTP_200_OK)
@@ -606,7 +686,7 @@ async def change_password(
             detail="Current password is incorrect.",
         )
     tenant.password_hash = _hash_password(body.new_password)
+    await _increment_auth_version(db, tenant)
     await db.commit()
-    await _revoke_all_sessions_for_tenant(str(tenant.id))
     logger.info("auth.password_changed", tenant_id=str(tenant.id))
     return {"message": "Password updated successfully."}

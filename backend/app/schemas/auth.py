@@ -66,6 +66,8 @@ class TenantProfileResponse(BaseModel):
     email: str
     api_key_prefix: str
     active_policy_version: int
+    # Returned only in development/test when an email change needs verification.
+    verification_url: str | None = None
 
 
 class RegenerateApiKeyResponse(BaseModel):

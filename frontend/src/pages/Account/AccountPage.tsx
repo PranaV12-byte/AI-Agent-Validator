@@ -1,11 +1,22 @@
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
 import { useAuth } from "../../hooks/useAuth"
 import { updateProfileRequest } from "../../services/authService"
 
+function getVerificationToken(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url, window.location.origin).searchParams.get("token")
+  } catch {
+    return null
+  }
+}
+
 function AccountPage() {
-  const { user, refreshProfile } = useAuth()
+  const { user, logout, refreshProfile } = useAuth()
+  const navigate = useNavigate()
 
   const [companyName, setCompanyName] = useState(user?.company_name ?? "")
   const [email, setEmail] = useState(user?.email ?? "")
@@ -38,9 +49,19 @@ function AccountPage() {
     setEmailError(null)
     setIsSavingEmail(true)
     try {
-      await updateProfileRequest({ email: email.trim() })
-      await refreshProfile()
-      toast.success("Email updated. Check your inbox to re-verify.")
+      const updated = await updateProfileRequest({ email: email.trim() })
+      const verificationToken = getVerificationToken(updated.verification_url)
+
+      if (verificationToken) {
+        navigate(`/verify-email?token=${encodeURIComponent(verificationToken)}`, {
+          replace: true,
+        })
+      } else {
+        navigate("/login?verification=pending", { replace: true })
+      }
+      // Email changes invalidate the current auth_version. Do not refresh the
+      // now-revoked profile token; preserve the public handoff route above.
+      logout()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setEmailError(typeof detail === "string" ? detail : "Could not update email. Please try again.")

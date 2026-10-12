@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw"
-import { MOCK_JWT } from "../test/utils/renderWithProviders"
+import { MOCK_JWT } from "../test/utils/mockJwt"
 
 const dashboardStatsResponse = {
   total_requests: 120,

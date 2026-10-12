@@ -20,6 +20,7 @@ from app.services.api_key_cache import api_key_verify_cache
 from app.services.perf_trace import emit_timing, should_trace
 
 _JWT_BLOCKLIST_PREFIX = "jwt_blocklist:"
+_REFRESH_FAMILY_REVOKED_PREFIX = "refresh_family_revoked:"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -83,6 +84,18 @@ async def get_current_tenant(
         if not subject:
             raise HTTPException(status_code=401, detail="Invalid token subject")
         tenant_id = UUID(subject)
+        token_auth_version = payload.get("auth_version", 0)
+        session_family = payload.get("session_family")
+        if (
+            isinstance(token_auth_version, bool)
+            or not isinstance(token_auth_version, int)
+            or token_auth_version < 0
+            or (
+                session_family is not None
+                and (not isinstance(session_family, str) or not session_family)
+            )
+        ):
+            raise HTTPException(status_code=401, detail="Invalid token claims")
     except (JWTError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -93,10 +106,17 @@ async def get_current_tenant(
     # Fail-closed: if Redis is unavailable, return 503 rather than silently
     # accepting a potentially revoked token.
     jti = payload.get("jti")
-    if jti:
+    if jti or session_family:
         try:
             redis = await get_redis()
-            if await redis.exists(f"{_JWT_BLOCKLIST_PREFIX}{jti}"):
+            if jti and await redis.exists(f"{_JWT_BLOCKLIST_PREFIX}{jti}"):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token has been revoked",
+                )
+            if session_family and await redis.exists(
+                f"{_REFRESH_FAMILY_REVOKED_PREFIX}{session_family}"
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token has been revoked",
@@ -105,7 +125,7 @@ async def get_current_tenant(
             raise
         except Exception:
             import structlog as _log
-            _log.get_logger().error("jwt_blocklist_check_failed", jti=jti)
+            _log.get_logger().error("jwt_revocation_check_failed")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Authentication service temporarily unavailable",
@@ -119,6 +139,11 @@ async def get_current_tenant(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Tenant not found or inactive",
+        )
+    if token_auth_version != int(tenant.auth_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
         )
     return tenant
 

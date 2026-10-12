@@ -1,10 +1,19 @@
 import { ShieldCheck } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { resendVerification, verifyEmail } from "../../services/authService"
 
 type VerifyState = "loading" | "success" | "already_verified" | "error" | "no_token"
+
+function getVerificationToken(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url, window.location.origin).searchParams.get("token")
+  } catch {
+    return null
+  }
+}
 
 function EmailVerificationPage() {
   const navigate = useNavigate()
@@ -16,15 +25,31 @@ function EmailVerificationPage() {
   const [resendSubmitted, setResendSubmitted] = useState(false)
   const [resendLoading, setResendLoading] = useState(false)
   const [resendError, setResendError] = useState<string | null>(null)
+  const verificationRequestRef = useRef<{
+    token: string
+    promise: Promise<{ message: string }>
+  } | null>(null)
 
   useEffect(() => {
-    if (!token) return
+    if (!token) {
+      setState("no_token")
+      return
+    }
 
     let cancelled = false
+    setState("loading")
+
+    // StrictMode replays effects during development. Verification tokens are
+    // single-use, so both effect lifecycles for the same token must share the
+    // same in-flight request rather than consuming it twice.
+    if (verificationRequestRef.current?.token !== token) {
+      verificationRequestRef.current = { token, promise: verifyEmail(token) }
+    }
+    const verificationPromise = verificationRequestRef.current.promise
 
     async function verify() {
       try {
-        const data = await verifyEmail(token)
+        const data = await verificationPromise
         if (cancelled) return
         if (data.message.toLowerCase().includes("already")) {
           setState("already_verified")
@@ -45,8 +70,15 @@ function EmailVerificationPage() {
     setResendError(null)
     setResendLoading(true)
     try {
-      await resendVerification(resendEmail)
-      setResendSubmitted(true)
+      const response = await resendVerification(resendEmail)
+      const verificationToken = getVerificationToken(response.verification_url)
+      if (verificationToken) {
+        navigate(`/verify-email?token=${encodeURIComponent(verificationToken)}`, {
+          replace: true,
+        })
+      } else {
+        setResendSubmitted(true)
+      }
     } catch {
       setResendError("Something went wrong. Please try again.")
     } finally {
@@ -68,12 +100,18 @@ function EmailVerificationPage() {
         </div>
 
         {state === "loading" && (
-          <p className="text-text-muted text-sm">Verifying your email address…</p>
+          <p role="status" aria-live="polite" className="text-text-muted text-sm">
+            Verifying your email address…
+          </p>
         )}
 
         {(state === "success" || state === "already_verified") && (
           <div className="space-y-4">
-            <p className="text-sm text-brand-green bg-brand-green/10 border border-brand-green/30 rounded-lg px-3 py-2">
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-sm text-brand-green bg-brand-green/10 border border-brand-green/30 rounded-lg px-3 py-2"
+            >
               {state === "success"
                 ? "Your email has been verified! You can now sign in."
                 : "Your email is already verified. You can sign in."}
@@ -89,7 +127,10 @@ function EmailVerificationPage() {
 
         {(state === "error" || state === "no_token") && (
           <div className="space-y-5">
-            <p className="text-sm text-brand-red bg-brand-red/10 border border-brand-red/30 rounded-lg px-3 py-2">
+            <p
+              role="alert"
+              className="text-sm text-brand-red bg-brand-red/10 border border-brand-red/30 rounded-lg px-3 py-2"
+            >
               {state === "no_token"
                 ? "No verification token found in the link."
                 : "This verification link is invalid or has expired."}

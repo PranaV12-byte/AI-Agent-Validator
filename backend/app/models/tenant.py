@@ -47,6 +47,9 @@ class Tenant(Base):
     # First 8 chars of api_key for safe display: "sk-a3f2..."
     api_key_prefix = Column(String(8), nullable=False)
     active_policy_version = Column(Integer, nullable=False, default=0)
+    # Incremented whenever credentials or the verified email change so access
+    # and refresh tokens issued before that change stop working immediately.
+    auth_version = Column(Integer, nullable=False, default=0, server_default="0")
     is_active = Column(Boolean, nullable=False, default=True)
     email_verified = Column(Boolean, nullable=False, default=False)
     created_at = Column(

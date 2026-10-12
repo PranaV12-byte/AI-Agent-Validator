@@ -80,18 +80,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Ref keeps logout and performTokenRefresh stable (no dep on session state).
+  // Request handlers read from refs so token publication is synchronous with
+  // login/refresh completion and independent of React's next render.
   const sessionRef = useRef<AuthSession | null>(null)
-  sessionRef.current = session
+  const sessionGenerationRef = useRef(0)
+  const sessionOwnerRef = useRef(0)
 
   const logout = useCallback(() => {
-    // Best-effort server-side revocation (fire-and-forget).
-    const refreshToken = sessionRef.current?.refreshToken ?? null
-    logoutRequest(refreshToken).catch((err) => {
-      // Server-side revocation failed; local session cleared regardless.
-      // The refresh token will remain valid until its TTL expires.
-      console.warn("Server-side logout failed; refresh token may remain valid until TTL expiry.", err)
-    })
+    const endingSession = sessionRef.current
+    const generation = ++sessionGenerationRef.current
+
+    if (endingSession) {
+      // Snapshot both credentials before clearing the session. The refresh
+      // token revokes its family; the access token also covers legacy sessions
+      // that predate refresh-token storage.
+      logoutRequest(endingSession.refreshToken, endingSession.accessToken).catch(() => {
+        console.warn("Server-side logout failed; refresh token may remain valid until TTL expiry.")
+      })
+      queueMicrotask(() => {
+        if (sessionGenerationRef.current === generation) {
+          sessionRef.current = null
+          sessionOwnerRef.current = generation
+        }
+      })
+    } else {
+      sessionRef.current = null
+      sessionOwnerRef.current = generation
+    }
+
     localStorage.removeItem(STORAGE_KEY)
     setSession(null)
     setUser(null)
@@ -99,55 +115,132 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const performTokenRefresh = useCallback(async () => {
-    const currentRefreshToken = sessionRef.current?.refreshToken
+    const generation = sessionGenerationRef.current
+    const sessionBeingRefreshed = sessionRef.current
+    const currentRefreshToken = sessionBeingRefreshed?.refreshToken
+    if (sessionOwnerRef.current !== generation) {
+      // A request from the outgoing session can reach this handler after a
+      // replacement has begun. It must not log out the incoming session.
+      return
+    }
+    if (!sessionBeingRefreshed) {
+      // There is no active session to refresh or invalidate. In particular,
+      // do not cancel a login that is already in flight.
+      return
+    }
     if (!currentRefreshToken) {
-      logout()
+      if (sessionGenerationRef.current === generation) logout()
       return
     }
     try {
       const auth = await refreshTokenRequest(currentRefreshToken)
+      if (
+        sessionGenerationRef.current !== generation ||
+        sessionOwnerRef.current !== generation ||
+        sessionRef.current?.refreshToken !== currentRefreshToken
+      ) {
+        return
+      }
       const nextSession: AuthSession = {
         accessToken: auth.access_token,
         refreshToken: auth.refresh_token ?? null,
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession))
+      sessionRef.current = nextSession
+      sessionOwnerRef.current = generation
       setSession(nextSession)
     } catch {
-      logout()
+      if (
+        sessionGenerationRef.current === generation &&
+        sessionOwnerRef.current === generation &&
+        sessionRef.current?.refreshToken === currentRefreshToken
+      ) {
+        logout()
+      }
     }
   }, [logout])
 
   useEffect(() => {
     const restored = loadSession()
+    sessionOwnerRef.current = sessionGenerationRef.current
+    sessionRef.current = restored
     setSession(restored)
     setIsHydrated(true)
     setIsLoading(Boolean(restored))
   }, [])
 
   const login = useCallback(async (input: LoginInput) => {
-    const auth = await loginRequest(input)
+    const previousSession = sessionRef.current
+    const generation = ++sessionGenerationRef.current
+    if (previousSession) {
+      logoutRequest(previousSession.refreshToken, previousSession.accessToken).catch(() => {
+        console.warn("Server-side logout failed; refresh token may remain valid until TTL expiry.")
+      })
+      queueMicrotask(() => {
+        if (sessionGenerationRef.current === generation) {
+          sessionRef.current = null
+          sessionOwnerRef.current = generation
+        }
+      })
+    } else {
+      sessionRef.current = null
+      sessionOwnerRef.current = generation
+    }
+    localStorage.removeItem(STORAGE_KEY)
+    setSession(null)
+    setUser(null)
+    setIsLoading(true)
+
+    let auth: Awaited<ReturnType<typeof loginRequest>>
+    try {
+      auth = await loginRequest(input)
+    } catch (error) {
+      if (sessionGenerationRef.current === generation) setIsLoading(false)
+      throw error
+    }
+    if (sessionGenerationRef.current !== generation) return
+
     const nextSession: AuthSession = {
       accessToken: auth.access_token,
       refreshToken: auth.refresh_token ?? null,
     }
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession))
+    sessionRef.current = nextSession
+    sessionOwnerRef.current = generation
     setSession(nextSession)
     setIsLoading(true)
   }, [])
 
   const refreshProfile = useCallback(async () => {
+    const generation = sessionGenerationRef.current
+    if (!sessionRef.current || sessionOwnerRef.current !== generation) {
+      setIsLoading(false)
+      return
+    }
     setIsLoading(true)
     try {
       const profile = await fetchTenantProfile()
-      setUser(profile)
+      if (
+        sessionGenerationRef.current === generation &&
+        sessionOwnerRef.current === generation &&
+        sessionRef.current
+      ) {
+        setUser(profile)
+      }
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
+      if (
+        sessionGenerationRef.current === generation &&
+        sessionOwnerRef.current === generation &&
+        sessionRef.current &&
+        axios.isAxiosError(error) &&
+        error.response?.status === 401
+      ) {
         logout()
       }
       throw error
     } finally {
-      setIsLoading(false)
+      if (sessionGenerationRef.current === generation) setIsLoading(false)
     }
   }, [logout])
 
@@ -168,8 +261,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshProfile, session?.accessToken])
 
   useEffect(() => {
-    registerSessionProvider(() => ({ accessToken: session?.accessToken ?? null }))
-  }, [session])
+    registerSessionProvider(() => ({
+      accessToken: sessionRef.current?.accessToken ?? null,
+      // Keep the generation paired with the token currently in the ref. During
+      // logout/replacement the old token is retained briefly so its refresh
+      // token can be revoked; requests queued in that window must still be
+      // recognized as belonging to the old session, not the incoming one.
+      generation: sessionRef.current
+        ? sessionOwnerRef.current
+        : sessionGenerationRef.current,
+    }))
+    return () => registerSessionProvider(() => ({ accessToken: null }))
+  }, [])
 
   useEffect(() => {
     registerRefreshHandler(performTokenRefresh)

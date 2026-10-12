@@ -2,7 +2,10 @@
 Extended auth integration tests — edge cases the base suite doesn't cover.
 Requires live DB + Redis (uses the shared session-scoped TestClient fixture).
 """
+import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Lock
 from uuid import uuid4
 
 import pytest
@@ -251,6 +254,33 @@ def test_refresh_token_is_single_use(client: TestClient) -> None:
     assert resp2.status_code == 401
 
 
+def test_refresh_replay_revokes_descendant_access_and_refresh_tokens(client: TestClient) -> None:
+    auth = _ok_signup(client)
+    first_refresh = auth["refresh_token"]
+
+    rotated = client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": first_refresh}
+    )
+    assert rotated.status_code == 200
+    descendant = rotated.json()
+
+    replay = client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": first_refresh}
+    )
+    assert replay.status_code == 401
+
+    descendant_profile = client.get(
+        "/api/v1/auth/me", headers=_auth_headers(descendant["access_token"])
+    )
+    assert descendant_profile.status_code == 401
+
+    descendant_refresh = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": descendant["refresh_token"]},
+    )
+    assert descendant_refresh.status_code == 401
+
+
 def test_invalid_refresh_token_returns_401(client: TestClient) -> None:
     """Random string as refresh token → 401."""
     resp = client.post("/api/v1/auth/refresh", json={"refresh_token": "not-a-real-token"})
@@ -265,6 +295,7 @@ def test_old_refresh_token_unusable_after_password_reset(client: TestClient) -> 
     """After password reset, old refresh token returns 401."""
     suffix = str(uuid4())
     auth = _ok_signup(client, suffix)
+    old_access = auth["access_token"]
     old_refresh = auth["refresh_token"]
 
     # Request reset URL (works in test environment)
@@ -288,6 +319,121 @@ def test_old_refresh_token_unusable_after_password_reset(client: TestClient) -> 
         "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
     )
     assert refresh_resp.status_code == 401
+
+    old_access_resp = client.get(
+        "/api/v1/auth/me", headers=_auth_headers(old_access)
+    )
+    assert old_access_resp.status_code == 401
+
+    new_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": f"authext-{suffix}@example.com",
+            "password": "NewPass456!",
+        },
+    )
+    assert new_login.status_code == 200
+    assert client.get(
+        "/api/v1/auth/me",
+        headers=_auth_headers(new_login.json()["access_token"]),
+    ).status_code == 200
+
+
+def test_overlapping_valid_password_resets_advance_auth_version_without_losing_sessions(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A login between two serialized resets is invalidated by the later commit."""
+    import app.api.v1.auth as auth_module
+
+    suffix = str(uuid4())
+    auth = _ok_signup(client, suffix)
+    email = f"authext-{suffix}@example.com"
+    reset_tokens: list[str] = []
+    for _ in range(2):
+        forgot = client.post("/api/v1/auth/forgot-password", json={"email": email})
+        assert forgot.status_code == 200
+        reset_url = forgot.json().get("reset_url")
+        assert reset_url
+        reset_tokens.append(reset_url.split("token=", 1)[1])
+
+    first_incremented = Event()
+    second_started = Event()
+    second_incremented = Event()
+    release_first = Event()
+    release_second = Event()
+    call_lock = Lock()
+    call_count = 0
+    original_increment = auth_module._increment_auth_version
+
+    async def coordinated_increment(db, tenant) -> int:
+        nonlocal call_count
+        with call_lock:
+            invocation = call_count
+            call_count += 1
+
+        if invocation == 1:
+            second_started.set()
+
+        version = await original_increment(db, tenant)
+        if invocation == 0:
+            first_incremented.set()
+            if not await asyncio.to_thread(release_first.wait, 15):
+                raise RuntimeError("timed out waiting to release the first reset")
+        elif invocation == 1:
+            second_incremented.set()
+            if not await asyncio.to_thread(release_second.wait, 15):
+                raise RuntimeError("timed out waiting to release the second reset")
+        return version
+
+    monkeypatch.setattr(auth_module, "_increment_auth_version", coordinated_increment)
+
+    reset_payloads = [
+        {"token": reset_tokens[0], "new_password": "FirstPass456!"},
+        {"token": reset_tokens[1], "new_password": "SecondPass789!"},
+    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_reset = pool.submit(
+            client.post, "/api/v1/auth/reset-password", json=reset_payloads[0]
+        )
+        assert first_incremented.wait(10), "first reset did not reach its version update"
+        second_reset = pool.submit(
+            client.post, "/api/v1/auth/reset-password", json=reset_payloads[1]
+        )
+        assert second_started.wait(10), "second reset did not start while the first held its update"
+
+        release_first.set()
+        first_response = first_reset.result(timeout=15)
+        assert first_response.status_code == 200
+        assert second_incremented.wait(10), "second reset did not reach its version update"
+
+        midway_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": "FirstPass456!"},
+        )
+        assert midway_login.status_code == 200
+        midway_token = midway_login.json()["access_token"]
+
+        release_second.set()
+        second_response = second_reset.result(timeout=15)
+
+    assert second_response.status_code == 200
+    assert client.get(
+        "/api/v1/auth/me", headers=_auth_headers(auth["access_token"])
+    ).status_code == 401
+    assert client.get(
+        "/api/v1/auth/me", headers=_auth_headers(midway_token)
+    ).status_code == 401
+
+    final_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "SecondPass789!"},
+    )
+    assert final_login.status_code == 200
+    assert client.get(
+        "/api/v1/auth/me",
+        headers=_auth_headers(final_login.json()["access_token"]),
+    ).status_code == 200
 
 
 def test_signup_creates_safety_config(client: TestClient) -> None:
@@ -373,6 +519,9 @@ class TestChangePassword:
         )
         assert resp.status_code == 200
         assert "message" in resp.json()
+        assert client.get(
+            "/api/v1/auth/me", headers=headers
+        ).status_code == 401
 
     def test_change_password_wrong_current(self, client, make_tenant):
         data = make_tenant(password="OldPass123!")
@@ -427,6 +576,13 @@ class TestUpdateProfile:
         )
         assert resp.status_code == 200
         assert resp.json()["email"] == new_email
+        verification_url = resp.json().get("verification_url")
+        assert verification_url
+
+        token = verification_url.split("token=", 1)[1]
+        verify = client.post("/api/v1/auth/verify-email", json={"token": token})
+        assert verify.status_code == 200
+        assert client.get("/api/v1/auth/me", headers=headers).status_code == 401
 
     def test_update_email_conflict(self, client, make_tenant):
         from uuid import uuid4

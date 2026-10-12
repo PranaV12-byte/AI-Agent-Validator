@@ -19,25 +19,31 @@ import {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeAxiosError(status: number, data: unknown = {}) {
+function makeAxiosError(
+  status: number,
+  data: unknown = {},
+  config: InternalAxiosRequestConfig = { headers: {} } as InternalAxiosRequestConfig,
+) {
   const error = new axios.AxiosError(
     `Request failed with status code ${status}`,
     `ERR_BAD_RESPONSE`,
-    { headers: {} } as any,
+    config,
     {},
     {
       status,
       statusText: String(status),
       headers: {},
-      config: { headers: {} } as any,
+      config,
       data,
     },
   )
   return error
 }
 
-function makeNetworkError() {
-  return new axios.AxiosError("Network Error", "ERR_NETWORK", { headers: {} } as any, {})
+function makeNetworkError(
+  config: InternalAxiosRequestConfig = { headers: {} } as InternalAxiosRequestConfig,
+) {
+  return new axios.AxiosError("Network Error", "ERR_NETWORK", config, {})
 }
 
 // ─── getErrorMessage ─────────────────────────────────────────────────────────
@@ -356,8 +362,7 @@ describe("apiClient 5xx and network error retry", () => {
 
   it("retries on 500 up to MAX_RETRIES=2 times, calling adapter 3 times total, then rejects", async () => {
     const mockAdapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
-      void config
-      throw makeAxiosError(500)
+      throw makeAxiosError(500, {}, config)
     })
     apiClient.defaults.adapter = mockAdapter
 
@@ -370,8 +375,7 @@ describe("apiClient 5xx and network error retry", () => {
 
   it("retries on network error up to MAX_RETRIES=2 times, calling adapter 3 times total", async () => {
     const mockAdapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
-      void config
-      throw makeNetworkError()
+      throw makeNetworkError(config)
     })
     apiClient.defaults.adapter = mockAdapter
 
@@ -379,6 +383,21 @@ describe("apiClient 5xx and network error retry", () => {
 
     expect(mockAdapter).toHaveBeenCalledTimes(3)
     expect(axios.isAxiosError(err)).toBe(true)
+  })
+
+  it("honors the per-request no-retry flag for protected conversation calls", async () => {
+    const mockAdapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
+      throw makeAxiosError(503, {}, config)
+    })
+    apiClient.defaults.adapter = mockAdapter
+
+    const error = await apiClient
+      .post("/protected-conversation", { message: "synthetic" }, { _disableRetries: true } as object)
+      .catch((caught: unknown) => caught)
+
+    expect(mockAdapter).toHaveBeenCalledOnce()
+    expect(axios.isAxiosError(error)).toBe(true)
+    expect((error as AxiosError).response?.status).toBe(503)
   })
 })
 
@@ -411,7 +430,7 @@ describe("apiClient 401 refresh and retry", () => {
     let adapterCalls = 0
     apiClient.defaults.adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
       adapterCalls++
-      if (adapterCalls === 1) throw makeAxiosError(401)
+      if (adapterCalls === 1) throw makeAxiosError(401, {}, config)
       return { data: { ok: true }, status: 200, statusText: "OK", headers: {}, config }
     })
 
@@ -436,7 +455,7 @@ describe("apiClient 401 refresh and retry", () => {
     let adapterCalls = 0
     apiClient.defaults.adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
       const n = ++adapterCalls
-      if (n <= 2) throw makeAxiosError(401)
+      if (n <= 2) throw makeAxiosError(401, {}, config)
       return { data: {}, status: 200, statusText: "OK", headers: {}, config }
     })
 
@@ -452,5 +471,40 @@ describe("apiClient 401 refresh and retry", () => {
 
     resolveRefresh()
     await Promise.all([p1, p2])
+  })
+
+  it("does not refresh or log out when a previous session's 401 arrives after a new login", async () => {
+    let session = { accessToken: "session-A", generation: 1 }
+    const refreshFn = vi.fn().mockResolvedValue(undefined)
+    const unauthorizedFn = vi.fn()
+    registerSessionProvider(() => session)
+    registerRefreshHandler(refreshFn)
+    registerUnauthorizedHandler(unauthorizedFn)
+
+    let resolveAdapterStarted!: () => void
+    const adapterStarted = new Promise<void>((resolve) => {
+      resolveAdapterStarted = resolve
+    })
+    let requestConfig!: InternalAxiosRequestConfig
+    let rejectAdapter!: (error: unknown) => void
+    apiClient.defaults.adapter = vi.fn((config: InternalAxiosRequestConfig) => {
+      requestConfig = config
+      resolveAdapterStarted()
+      return new Promise((_, reject) => {
+        rejectAdapter = reject
+      })
+    })
+
+    const responseError = apiClient.get("/resource").catch((error: unknown) => error)
+    await adapterStarted
+    session = { accessToken: null, generation: 2 } // A logged out.
+    session = { accessToken: "session-B", generation: 3 } // B logged in.
+    rejectAdapter(makeAxiosError(401, {}, requestConfig))
+
+    const error = await responseError
+    expect(axios.isAxiosError(error)).toBe(true)
+    expect((error as AxiosError).response?.status).toBe(401)
+    expect(refreshFn).not.toHaveBeenCalled()
+    expect(unauthorizedFn).not.toHaveBeenCalled()
   })
 })

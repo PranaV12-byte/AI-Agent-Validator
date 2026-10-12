@@ -47,6 +47,17 @@ def test_access_token_contains_expected_claims() -> None:
     assert "iat" in payload
 
 
+def test_access_token_carries_session_invalidation_claims() -> None:
+    token = _create_access_token("tenant-session", auth_version=3, session_family="family-a")
+    payload = jwt.decode(
+        token,
+        settings.jwt_secret_key,
+        algorithms=[settings.jwt_algorithm],
+    )
+    assert payload["auth_version"] == 3
+    assert payload["session_family"] == "family-a"
+
+
 def test_access_token_exp_is_in_future() -> None:
     """Token expiry timestamp is strictly in the future."""
     token = _create_access_token("tenant-xyz")

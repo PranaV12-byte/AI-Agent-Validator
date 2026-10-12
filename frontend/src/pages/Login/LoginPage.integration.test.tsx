@@ -42,6 +42,20 @@ describe("Login integration", () => {
     })
   })
 
+  it("shows a verify-first sign-in message after an email change without a local link", () => {
+    render(
+      <AuthProvider>
+        <MemoryRouter initialEntries={["/login?verification=pending"]}>
+          <LoginPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /verify your new address using the link sent to your inbox/i,
+    )
+  })
+
   it("shows credentials error when login API returns 401", async () => {
     const user = userEvent.setup()
 

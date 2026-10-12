@@ -55,11 +55,18 @@ export async function refreshTokenRequest(refreshToken: string): Promise<AuthRes
   return response.data
 }
 
-export async function logoutRequest(refreshToken: string | null = null): Promise<void> {
+export async function logoutRequest(
+  refreshToken: string | null = null,
+  accessToken: string | null = null,
+): Promise<void> {
   await apiClient.post(
     "/auth/logout",
     refreshToken ? { refresh_token: refreshToken } : undefined,
-    { _skipProactiveRefresh: true, _retry: true } as object,
+    {
+      _skipProactiveRefresh: true,
+      _retry: true,
+      _logoutAccessToken: accessToken,
+    } as object,
   )
 }
 
@@ -68,8 +75,13 @@ export async function verifyEmail(token: string): Promise<{ message: string }> {
   return response.data
 }
 
-export async function resendVerification(email: string): Promise<{ message: string }> {
-  const response = await apiClient.post<{ message: string }>("/auth/resend-verification", { email })
+export async function resendVerification(
+  email: string,
+): Promise<{ message: string; verification_url?: string | null }> {
+  const response = await apiClient.post<{
+    message: string
+    verification_url?: string | null
+  }>("/auth/resend-verification", { email })
   return response.data
 }
 
@@ -86,7 +98,9 @@ export async function changePasswordRequest(
 export async function updateProfileRequest(payload: {
   company_name?: string
   email?: string
-}): Promise<TenantProfile> {
-  const response = await apiClient.put<TenantProfile>("/auth/me", payload)
+}): Promise<TenantProfile & { verification_url?: string | null }> {
+  const response = await apiClient.put<
+    TenantProfile & { verification_url?: string | null }
+  >("/auth/me", payload)
   return response.data
 }

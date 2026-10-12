@@ -33,15 +33,25 @@ export function getErrorMessage(error: unknown, fallback = "An unexpected error 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1"
 
-type SessionProvider = () => { accessToken: string | null }
+type SessionProvider = () => { accessToken: string | null; generation?: number }
 type RefreshHandler = () => Promise<void>
+
+export type AuthAwareRequestConfig = AxiosRequestConfig & {
+  _authGeneration?: number
+  _authSessionPresent?: boolean
+  _retry?: boolean
+  _retryCount?: number
+  _skipProactiveRefresh?: boolean
+  _disableRetries?: boolean
+  _logoutAccessToken?: string | null
+}
 
 let getSession: SessionProvider = () => ({ accessToken: null })
 let onUnauthorized: (() => void) | null = null
 let refreshHandler: RefreshHandler | null = null
 
 // Singleton promise prevents concurrent refresh races across multiple tabs / requests.
-let refreshPromise: Promise<void> | null = null
+let refreshPromise: { generation: number; promise: Promise<void> } | null = null
 
 export function registerSessionProvider(provider: SessionProvider) {
   getSession = provider
@@ -73,40 +83,84 @@ function getTokenExpiry(token: string): number | null {
   }
 }
 
-function ensureRefresh(): Promise<void> {
-  if (!refreshPromise) {
-    const handler = refreshHandler
-    refreshPromise = (
-      handler ? handler() : Promise.reject(new Error("No refresh handler registered"))
-    ).finally(() => {
-      refreshPromise = null
-    })
-  }
-  return refreshPromise
+function currentGeneration(): number {
+  return getSession().generation ?? 0
+}
+
+function ensureRefresh(generation: number): Promise<void> {
+  if (refreshPromise?.generation === generation) return refreshPromise.promise
+
+  const handler = refreshHandler
+  const promise = (
+    handler ? handler() : Promise.reject(new Error("No refresh handler registered"))
+  ).finally(() => {
+    if (refreshPromise?.promise === promise) refreshPromise = null
+  })
+  refreshPromise = { generation, promise }
+  return promise
+}
+
+function isPublicAuthRequest(url: string | undefined): boolean {
+  return /\/auth\/(?:login|signup|refresh|forgot-password|reset-password|verify-email|resend-verification)(?:\?|$)/.test(
+    url ?? "",
+  )
+}
+
+function isLogoutRequest(url: string | undefined): boolean {
+  return /\/auth\/logout(?:\?|$)/.test(url ?? "")
+}
+
+function requestStillOwned(config: AuthAwareRequestConfig): boolean {
+  return (
+    (config._authGeneration === undefined || config._authGeneration === currentGeneration()) &&
+    !config.signal?.aborted
+  )
 }
 
 // Proactive refresh: silently refresh the access token before it expires.
 apiClient.interceptors.request.use(async (config) => {
-  const { accessToken } = getSession()
+  const requestConfig = config as AuthAwareRequestConfig
+  const session = getSession()
+  const generation = requestConfig._authGeneration ?? session.generation ?? 0
+  const publicAuthRequest = isPublicAuthRequest(config.url)
+  const logoutRequest = isLogoutRequest(config.url)
+  requestConfig._authGeneration = generation
+  requestConfig._authSessionPresent = requestConfig._authSessionPresent ??
+    Boolean(session.accessToken && !publicAuthRequest && !logoutRequest)
+  if (!logoutRequest && generation !== (session.generation ?? 0)) {
+    throw new axios.CanceledError("Authentication session changed")
+  }
 
   // Skip proactive refresh for requests that are themselves part of the refresh flow
   // to prevent a circular deadlock: refresh request → interceptor → ensureRefresh() → same refreshPromise
-  const skip = (config as unknown as Record<string, unknown>)._skipProactiveRefresh
+  const skip = requestConfig._skipProactiveRefresh || publicAuthRequest || logoutRequest
 
-  if (!skip && accessToken && refreshHandler) {
-    const exp = getTokenExpiry(accessToken)
+  if (!skip && session.accessToken && refreshHandler) {
+    const exp = getTokenExpiry(session.accessToken)
     if (exp !== null && Date.now() / 1000 > exp - 60) {
       try {
-        await ensureRefresh()
+        await ensureRefresh(generation)
       } catch {
         // Refresh failed — let the request through; the 401 interceptor will clean up.
       }
     }
   }
 
+  if (!logoutRequest && generation !== currentGeneration()) {
+    throw new axios.CanceledError("Authentication session changed")
+  }
+
   // Re-read after potential refresh so we attach the newest token.
   const { accessToken: freshToken } = getSession()
-  if (freshToken) {
+  if (publicAuthRequest || logoutRequest) {
+    // Public auth calls never carry ambient credentials. A logout may carry
+    // only the access token explicitly snapshotted from the session being
+    // ended; never substitute whichever session is current at dispatch time.
+    delete config.headers.Authorization
+    if (logoutRequest && requestConfig._logoutAccessToken) {
+      config.headers.Authorization = `Bearer ${requestConfig._logoutAccessToken}`
+    }
+  } else if (freshToken) {
     config.headers.Authorization = `Bearer ${freshToken}`
   }
 
@@ -122,10 +176,20 @@ apiClient.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    const originalRequest = error.config as (AxiosRequestConfig & { _retry?: boolean; _retryCount?: number }) | undefined
+    if (axios.isCancel(error)) return Promise.reject(error)
+
+    const originalRequest = error.config as AuthAwareRequestConfig | undefined
+    if (originalRequest && !requestStillOwned(originalRequest)) {
+      return Promise.reject(error)
+    }
 
     // Retry on 5xx / network errors (not on 401 — that path has its own logic below)
-    if (isRetryable(error) && originalRequest) {
+    if (
+      isRetryable(error) &&
+      originalRequest &&
+      !originalRequest.signal?.aborted &&
+      !originalRequest._disableRetries
+    ) {
       const retryCount = originalRequest._retryCount ?? 0
       if (retryCount < MAX_RETRIES) {
         originalRequest._retryCount = retryCount + 1
@@ -134,25 +198,43 @@ apiClient.interceptors.response.use(
       }
     }
 
+    const isAuthLifecycleRequest =
+      isPublicAuthRequest(originalRequest?.url) || isLogoutRequest(originalRequest?.url)
+    const requestHadSession = originalRequest?._authSessionPresent ?? true
     if (
       error.response?.status === 401 &&
       originalRequest &&
+      requestHadSession &&
+      !isAuthLifecycleRequest &&
       !originalRequest._retry &&
       refreshHandler
     ) {
       originalRequest._retry = true
+      const generation = originalRequest._authGeneration ?? currentGeneration()
       try {
-        await ensureRefresh()
-        const { accessToken: freshToken } = getSession()
-        if (freshToken && originalRequest.headers) {
-          (originalRequest.headers as Record<string, string>).Authorization =
-            `Bearer ${freshToken}`
-        }
-        return await apiClient(originalRequest)
+        await ensureRefresh(generation)
       } catch {
-        onUnauthorized?.()
+        if (requestStillOwned(originalRequest)) onUnauthorized?.()
+        return Promise.reject(error)
       }
-    } else if (error.response?.status === 401) {
+
+      if (!requestStillOwned(originalRequest)) return Promise.reject(error)
+      const { accessToken: freshToken } = getSession()
+      if (!freshToken) {
+        onUnauthorized?.()
+        return Promise.reject(error)
+      }
+      if (originalRequest.headers) {
+        (originalRequest.headers as Record<string, string>).Authorization =
+          `Bearer ${freshToken}`
+      }
+      return apiClient(originalRequest)
+    } else if (
+      error.response?.status === 401 &&
+      requestHadSession &&
+      !isAuthLifecycleRequest &&
+      (!originalRequest || requestStillOwned(originalRequest))
+    ) {
       onUnauthorized?.()
     }
 
