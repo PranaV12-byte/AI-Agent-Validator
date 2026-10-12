@@ -1,3 +1,5 @@
+> **Local demo status:** This file is a historical production-hardening plan, not a record of tests run for the October 2026 local prototype. Use the [local demo runbook and feature matrix](local-demo-runbook.md) for current scope, owner-captured results, and remaining acceptance checks. Do not treat this historical checklist as current test evidence.
+
  Plan: Production-Readiness Hardening                                                               
                                                                                                     
  Context                                                                                            

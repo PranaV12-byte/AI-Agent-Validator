@@ -25,6 +25,29 @@ function formatTimestamp(value: string): string {
   return new Date(value).toLocaleString()
 }
 
+function getAnchoringStatus(log: AuditLog): NonNullable<AuditLog["anchoring_status"]> {
+  const transactionId = log.algorand_tx_id
+  if (transactionId?.toLowerCase().startsWith("mock_tx_")) {
+    return "not_anchored"
+  }
+  if (log.anchoring_status === "anchored" && !transactionId) {
+    return "pending"
+  }
+  if (log.anchoring_status) {
+    return log.anchoring_status
+  }
+  return transactionId ? "anchored" : "pending"
+}
+
+function anchoringLabel(status: NonNullable<AuditLog["anchoring_status"]>): string {
+  switch (status) {
+    case "anchored": return "Anchored"
+    case "pending": return "Pending"
+    case "disabled": return "Disabled"
+    case "not_anchored": return "Not anchored"
+  }
+}
+
 function AuditTable({
   logs,
   isLoading,
@@ -107,18 +130,21 @@ function AuditTable({
                     <td className="px-6 py-5 font-medium">{log.violation_type ?? "n/a"}</td>
                     <td className="px-6 py-5 text-sm text-text-muted">{log.processing_ms ?? 0}ms</td>
                     <td className="px-6 py-5">
-                      {log.algorand_tx_id ? (
+                      {getAnchoringStatus(log) === "anchored" && log.algorand_tx_id ? (
                         <a
                           href={`https://testnet.explorer.perawallet.app/tx/${log.algorand_tx_id}`}
                           target="_blank"
                           rel="noreferrer"
                           className="text-text-muted hover:text-white"
+                          aria-label="Open anchored transaction in the Algorand explorer"
                           onClick={(event) => event.stopPropagation()}
                         >
                           <ExternalLink className="h-4 w-4" />
                         </a>
                       ) : (
-                        <span className="text-text-muted">-</span>
+                        <span className="text-text-muted">
+                          {anchoringLabel(getAnchoringStatus(log))}
+                        </span>
                       )}
                     </td>
                   </tr>

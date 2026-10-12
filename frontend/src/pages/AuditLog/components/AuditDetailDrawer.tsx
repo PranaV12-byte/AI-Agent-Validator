@@ -18,6 +18,39 @@ function formatTimestamp(value: string): string {
   return new Date(value).toLocaleString()
 }
 
+function getAnchoringStatus(log: AuditLog): NonNullable<AuditLog["anchoring_status"]> {
+  const transactionId = log.algorand_tx_id
+  if (transactionId?.toLowerCase().startsWith("mock_tx_")) {
+    return "not_anchored"
+  }
+  if (log.anchoring_status === "anchored" && !transactionId) {
+    return "pending"
+  }
+  if (log.anchoring_status) {
+    return log.anchoring_status
+  }
+  return transactionId ? "anchored" : "pending"
+}
+
+function anchoringLabel(status: NonNullable<AuditLog["anchoring_status"]>): string {
+  switch (status) {
+    case "anchored": return "Anchored"
+    case "pending": return "Pending"
+    case "disabled": return "Disabled for this local demo"
+    case "not_anchored": return "Not anchored"
+  }
+}
+
+function hashProvenanceLabel(log: AuditLog): string {
+  if (log.payload_hash_provenance === "stored_unverified") {
+    return "Stored hash; not independently verified"
+  }
+  if (log.payload_hash_provenance === "unavailable" || !log.payload_hash) {
+    return "Unavailable"
+  }
+  return "Stored hash; provenance not supplied"
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -80,8 +113,8 @@ function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
         ) : null}
         {log.session_id ? <Field label="Session ID">{log.session_id}</Field> : null}
         {log.ip_address ? <Field label="IP Address">{log.ip_address}</Field> : null}
-        {log.algorand_tx_id ? (
-          <Field label="Blockchain Record">
+        <Field label="Algorand anchoring">
+          {getAnchoringStatus(log) === "anchored" && log.algorand_tx_id ? (
             <a
               href={`https://testnet.explorer.perawallet.app/tx/${log.algorand_tx_id}`}
               target="_blank"
@@ -90,11 +123,27 @@ function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
             >
               {log.algorand_tx_id}
             </a>
+          ) : (
+            anchoringLabel(getAnchoringStatus(log))
+          )}
+        </Field>
+        <Field label="Hash provenance">{hashProvenanceLabel(log)}</Field>
+        {log.payload_hash ? (
+          <Field label="Payload hash">
+            <code className="block break-all text-xs">{log.payload_hash}</code>
+          </Field>
+        ) : null}
+        {log.redacted_fields?.length ? (
+          <Field label="Display sanitization">
+            <span>
+              Stored history is unchanged. Displayed values were sanitized in: {log.redacted_fields.join(", ")}.
+              The hash remains stored as-is and has not been independently verified.
+            </span>
           </Field>
         ) : null}
 
         <div>
-          <p className="text-text-muted mb-1">Agent Input Payload</p>
+          <p className="text-text-muted mb-1">Sanitized Input Preview</p>
           <pre className="bg-card-bg border border-border-color rounded-lg p-3 overflow-auto text-xs whitespace-pre-wrap break-all">
             {JSON.stringify({ input_preview: log.input_preview }, null, 2)}
           </pre>

@@ -1,11 +1,10 @@
 """Pydantic schemas for audit APIs."""
 
 from datetime import datetime
-from ipaddress import IPv4Address, IPv6Address
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AuditLogResponse(BaseModel):
@@ -23,12 +22,15 @@ class AuditLogResponse(BaseModel):
     input_preview: str | None
     details: dict[str, Any]
     payload_hash: str | None
+    payload_hash_provenance: Literal["stored_unverified", "unavailable"]
     policy_version: int | None
     algorand_tx_id: str | None
     processing_ms: int | None
-    ip_address: IPv4Address | IPv6Address | None
+    ip_address: str | None
     user_agent: str | None
     created_at: datetime
+    redacted_fields: list[str] = Field(default_factory=list)
+    anchoring_status: Literal["anchored", "pending", "disabled", "not_anchored"] = "pending"
 
 
 class AuditListResponse(BaseModel):

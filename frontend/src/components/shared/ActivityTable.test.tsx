@@ -40,6 +40,25 @@ describe("ActivityTable", () => {
     expect(screen.queryByRole("button", { name: /View all activity/i })).not.toBeInTheDocument()
   })
 
+  it("uses the sanitized input preview and does not render decision details", () => {
+    render(
+      <MemoryRouter>
+        <ActivityTable
+          logs={[{
+            ...mockLog,
+            input_preview: "Email [REDACTED]",
+            details: { password: "tiny-secret" },
+          }]}
+          isLoading={false}
+          error={null}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText("Email [REDACTED]")).toBeInTheDocument()
+    expect(screen.queryByText("tiny-secret")).not.toBeInTheDocument()
+  })
+
   it("navigates to /audit-log when link is clicked", () => {
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>

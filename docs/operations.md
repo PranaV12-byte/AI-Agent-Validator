@@ -1,12 +1,21 @@
 # Operations Runbook
 
 ## Table of Contents
-1. [Starting and Stopping](#starting-and-stopping)
-2. [Database Backup and Restore](#database-backup-and-restore)
-3. [Secret Rotation](#secret-rotation)
-4. [Rollback Procedure](#rollback-procedure)
-5. [Scaling](#scaling)
-6. [Monitoring](#monitoring)
+1. [Local Prototype](#local-prototype)
+2. [Starting and Stopping](#starting-and-stopping)
+3. [Database Backup and Restore](#database-backup-and-restore)
+4. [Secret Rotation](#secret-rotation)
+5. [Rollback Procedure](#rollback-procedure)
+6. [Scaling](#scaling)
+7. [Monitoring](#monitoring)
+
+---
+
+## Local Prototype
+
+The approved synthetic local demo uses its own procedure and isolated database targets. See the [local demo runbook](local-demo-runbook.md) for the current ports, startup steps, persistence rehearsal, and feature evidence. Do not use these steps for production.
+
+The local runbook is the source of truth for demo readiness. Its matrix distinguishes source review from tests and runtime rehearsal; only owner-captured evidence can move a pending item to passed.
 
 ---
 

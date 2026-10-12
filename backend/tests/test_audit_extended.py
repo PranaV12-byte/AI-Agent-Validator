@@ -3,6 +3,7 @@ Extended audit integration tests — date filtering, pagination edge cases,
 ordering, data integrity, and tenant isolation.
 """
 from datetime import datetime, timedelta, timezone
+import json
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -80,6 +81,67 @@ def _seed_logs(
                 "ip_address": None,
                 "created_at": base_time - timedelta(minutes=i),
             })
+
+
+def _seed_legacy_sensitive_log(tenant_id: UUID) -> tuple[str, dict[str, str]]:
+    """Seed one synthetic pre-sanitization row without touching ORM state."""
+    sync_url = settings.database_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    engine = create_engine(sync_url)
+    row_id = str(uuid4())
+    raw = {
+        "input_preview": (
+            "=1+1 Email alice@example.com; "
+            "Bearer abcdefghijklmnopqrstuvwxyz123456"
+        ),
+        "session_id": "legacy-session-alice@example.com",
+        "user_agent": "Client Bearer abcdefghijklmnopqrstuvwxyz123456",
+        "api_key": "gsk_ABCDEFGHIJKLMNOPQRST1234",
+        "password": "tiny",
+        "payload_hash": "stored-historical-hash",
+        "ip_address": "203.0.113.10",
+        "algorand_tx_id": "mock_tx_legacy",
+    }
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO audit_logs (
+                    id, tenant_id, session_id, hook_type, action,
+                    violation_type, severity, input_preview, details,
+                    payload_hash, policy_version, algorand_tx_id,
+                    processing_ms, ip_address, user_agent, created_at
+                ) VALUES (
+                    :id, :tenant_id, :session_id, 'post_execution', 'BLOCKED',
+                    'prompt_injection', 'high', :input_preview, CAST(:details AS jsonb),
+                    :payload_hash, 1, :algorand_tx_id,
+                    10, CAST(:ip_address AS inet), :user_agent, NOW()
+                )
+                """
+            ),
+            {
+                "id": row_id,
+                "tenant_id": str(tenant_id),
+                "session_id": raw["session_id"],
+                "input_preview": raw["input_preview"],
+                "details": json.dumps({
+                    "request": {
+                        "api_key": raw["api_key"],
+                        "password": raw["password"],
+                    }
+                }),
+                "payload_hash": raw["payload_hash"],
+                "algorand_tx_id": raw["algorand_tx_id"],
+                "ip_address": raw["ip_address"],
+                "user_agent": raw["user_agent"],
+            },
+        )
+    with engine.connect() as conn:
+        raw["stored_ip_address"] = conn.execute(
+            text("SELECT ip_address::text FROM audit_logs WHERE id = :id"),
+            {"id": row_id},
+        ).scalar_one()
+    engine.dispose()
+    return row_id, raw
 
 
 # ---------------------------------------------------------------------------
@@ -377,3 +439,77 @@ class TestAuditExport:
     def test_export_requires_auth(self, client):
         resp = client.get("/api/v1/audit/export")
         assert resp.status_code == 401
+
+    def test_legacy_sensitive_rows_are_sanitized_in_api_and_csv_without_mutation(
+        self, client, make_tenant
+    ):
+        auth = make_tenant()
+        headers = _auth_headers(auth["access_token"])
+        tenant_id = _get_tenant_id(client, auth["access_token"])
+        row_id, raw = _seed_legacy_sensitive_log(tenant_id)
+
+        response = client.get(
+            "/api/v1/audit/",
+            params={"search": "alice@example.com"},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        row = next(log for log in response.json()["logs"] if log["id"] == row_id)
+        serialized = json.dumps(row)
+        assert "alice@example.com" not in serialized
+        assert "abcdefghijklmnopqrstuvwxyz123456" not in serialized
+        assert raw["api_key"] not in serialized
+        assert raw["password"] not in serialized
+        assert raw["session_id"] not in serialized
+        assert raw["ip_address"] not in serialized
+        assert row["payload_hash"] == raw["payload_hash"]
+        assert row["payload_hash_provenance"] == "stored_unverified"
+        assert row["algorand_tx_id"] is None
+        assert row["anchoring_status"] == "not_anchored"
+        assert set(row["redacted_fields"]) == {
+            "details", "input_preview", "ip_address", "session_id", "user_agent"
+        }
+
+        exported = client.get(
+            "/api/v1/audit/export",
+            params={"search": "alice@example.com"},
+            headers=headers,
+        )
+        assert exported.status_code == 200
+        assert "stored-historical-hash" in exported.text
+        assert "stored_unverified" in exported.text
+        assert "not_anchored" in exported.text
+        assert "redacted_fields" in exported.text.splitlines()[0]
+        assert "'=1+1" in exported.text
+        assert "alice@example.com" not in exported.text
+        assert "abcdefghijklmnopqrstuvwxyz123456" not in exported.text
+        assert raw["api_key"] not in exported.text
+        assert raw["password"] not in exported.text
+        assert raw["session_id"] not in exported.text
+        assert raw["ip_address"] not in exported.text
+
+        sync_url = settings.database_url.replace(
+            "postgresql+asyncpg", "postgresql+psycopg2"
+        )
+        engine = create_engine(sync_url)
+        with engine.connect() as conn:
+            stored = conn.execute(
+                text(
+                    """SELECT input_preview, details, payload_hash, session_id,
+                              ip_address::text, algorand_tx_id
+                       FROM audit_logs WHERE id = :id"""
+                ),
+                {"id": row_id},
+            ).one()
+        engine.dispose()
+        assert stored.input_preview == raw["input_preview"]
+        assert stored.details == {
+            "request": {
+                "api_key": raw["api_key"],
+                "password": raw["password"],
+            }
+        }
+        assert stored.payload_hash == raw["payload_hash"]
+        assert stored.session_id == raw["session_id"]
+        assert stored.ip_address == raw["stored_ip_address"]
+        assert stored.algorand_tx_id == raw["algorand_tx_id"]

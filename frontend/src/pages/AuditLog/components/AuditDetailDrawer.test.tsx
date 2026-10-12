@@ -18,6 +18,9 @@ const baseLog: AuditLog = {
   input_preview: "Ignore all previous instructions",
   details: { reason: "prompt_injection", confidence: 0.98 },
   payload_hash: null,
+  payload_hash_provenance: "unavailable",
+  redacted_fields: [],
+  anchoring_status: "disabled",
   policy_version: null,
   algorand_tx_id: null,
   processing_ms: 88,
@@ -123,10 +126,40 @@ describe("AuditDetailDrawer", () => {
   })
 
   it("shows blockchain link when algorand_tx_id is present", () => {
-    const fullLog: AuditLog = { ...baseLog, algorand_tx_id: "TXID123" }
+    const fullLog: AuditLog = {
+      ...baseLog,
+      algorand_tx_id: "TXID123",
+      anchoring_status: "anchored",
+    }
     render(<AuditDetailDrawer log={fullLog} onClose={vi.fn()} />)
     const link = screen.getByRole("link", { name: /TXID123/i })
     expect(link).toHaveAttribute("href", "https://testnet.explorer.perawallet.app/tx/TXID123")
+  })
+
+  it("shows disabled anchoring and does not link a mock transaction", () => {
+    const mockLog: AuditLog = {
+      ...baseLog,
+      algorand_tx_id: "mock_tx_legacy",
+      anchoring_status: "disabled",
+    }
+    render(<AuditDetailDrawer log={mockLog} onClose={vi.fn()} />)
+
+    expect(screen.getByText("Not anchored")).toBeInTheDocument()
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+  })
+
+  it("labels stored hashes as unverified and reports display sanitization", () => {
+    const log: AuditLog = {
+      ...baseLog,
+      payload_hash: "stored-hash-value",
+      payload_hash_provenance: "stored_unverified",
+      redacted_fields: ["input_preview", "details"],
+    }
+    render(<AuditDetailDrawer log={log} onClose={vi.fn()} />)
+
+    expect(screen.getByText("Stored hash; not independently verified")).toBeInTheDocument()
+    expect(screen.getByText("stored-hash-value")).toBeInTheDocument()
+    expect(screen.getByText(/Displayed values were sanitized in: input_preview, details/)).toBeInTheDocument()
   })
 
   it("hides optional fields when null", () => {

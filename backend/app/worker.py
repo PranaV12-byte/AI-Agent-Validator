@@ -1,5 +1,6 @@
 """Celery worker for async tasks: Algorand TX submission, report generation."""
 
+import re
 import structlog
 from celery import Celery
 from celery.signals import worker_shutdown
@@ -8,6 +9,12 @@ from sqlalchemy import create_engine
 from app.config import settings
 
 logger = structlog.get_logger()
+
+
+def _safe_error_type(error: Exception) -> str:
+    """Return bounded exception type metadata without provider error text."""
+    return re.sub(r"[^A-Za-z0-9_]", "", type(error).__name__)[:64] or "UnknownError"
+
 
 # Module-level singleton sync engine — created once, shared across all tasks.
 # This prevents the connection pool leak that occurs when create_engine() is
@@ -74,6 +81,7 @@ def submit_to_chain_task(
     """Submit a violation/approval to the Algorand smart contract."""
     from app.services.algorand_writer import submit_audit_to_algorand
 
+    retry_countdown = 30
     try:
         tx_id = submit_audit_to_algorand(
             audit_log_id,
@@ -81,6 +89,13 @@ def submit_to_chain_task(
             violation_type,
             payload_hash,
         )
+        if tx_id is None:
+            logger.info(
+                "algorand_audit_submission_skipped",
+                audit_log_id=audit_log_id,
+                reason="chain_not_configured",
+            )
+            return {"status": "skipped", "reason": "chain_not_configured"}
         _update_audit_tx_id(audit_log_id, tx_id)
         return {"status": "success", "tx_id": tx_id}
     except Exception as exc:
@@ -89,11 +104,23 @@ def submit_to_chain_task(
             logger.error(
                 "algorand_submit_permanently_failed",
                 audit_log_id=audit_log_id,
-                error=str(exc),
+                error_code="chain_submission_failed",
+                error_type=_safe_error_type(exc),
             )
-            return {"status": "failed", "error": str(exc)}
+            return {
+                "status": "failed",
+                "error_code": "chain_submission_failed",
+                "error_type": _safe_error_type(exc),
+            }
         countdown = 30 * (2 ** attempt)  # 30s, 60s, 120s
-        raise self.retry(exc=exc, countdown=countdown)
+        retry_countdown = countdown
+
+    # Retry outside the exception handler so Celery cannot retain a provider's
+    # original exception message as chained context.
+    raise self.retry(
+        exc=RuntimeError("chain_submission_failed"),
+        countdown=retry_countdown,
+    ) from None
 
 
 @celery_app.task(bind=True, name="register_policy_on_chain", max_retries=3)
@@ -105,8 +132,16 @@ def register_policy_on_chain_task(
     """Register a policy hash on Algorand."""
     from app.services.algorand_writer import register_policy_on_algorand
 
+    retry_countdown = 30
     try:
         tx_id = register_policy_on_algorand(policy_id, policy_hash)
+        if tx_id is None:
+            logger.info(
+                "algorand_policy_registration_skipped",
+                policy_id=policy_id,
+                reason="chain_not_configured",
+            )
+            return {"status": "skipped", "reason": "chain_not_configured"}
         _update_policy_tx_id(policy_id, tx_id)
         return {"status": "success", "tx_id": tx_id}
     except Exception as exc:
@@ -115,11 +150,23 @@ def register_policy_on_chain_task(
             logger.error(
                 "algorand_policy_registration_permanently_failed",
                 policy_id=policy_id,
-                error=str(exc),
+                error_code="policy_registration_failed",
+                error_type=_safe_error_type(exc),
             )
-            return {"status": "failed", "error": str(exc)}
+            return {
+                "status": "failed",
+                "error_code": "policy_registration_failed",
+                "error_type": _safe_error_type(exc),
+            }
         countdown = 30 * (2 ** attempt)
-        raise self.retry(exc=exc, countdown=countdown)
+        retry_countdown = countdown
+
+    # Retry outside the exception handler to keep the original provider error
+    # and any response-body credentials out of Celery's chained traceback.
+    raise self.retry(
+        exc=RuntimeError("policy_registration_failed"),
+        countdown=retry_countdown,
+    ) from None
 
 
 @celery_app.task(name="purge_old_audit_logs")
@@ -143,7 +190,7 @@ def purge_old_audit_logs_task() -> dict[str, int]:
 
         for row in rows:
             tenant_id = str(row.tenant_id)
-            retention_days = row.log_retention_days
+            retention_days = max(1, int(row.log_retention_days or 1))
 
             # Delete in batches to keep lock duration short.
             while True:

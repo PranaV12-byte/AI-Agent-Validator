@@ -57,6 +57,9 @@ export type AuditLog = {
   input_preview: string | null
   details: Record<string, unknown>
   payload_hash: string | null
+  payload_hash_provenance?: "stored_unverified" | "unavailable"
+  redacted_fields?: string[]
+  anchoring_status?: "anchored" | "pending" | "disabled" | "not_anchored"
   policy_version: number | null
   algorand_tx_id: string | null
   processing_ms: number | null

@@ -1,8 +1,8 @@
 """
 Algorand Interaction Service.
 Submits audit events and policy registrations to the SafebotAuditLog smart contract.
-IMPORTANT: For MVP/hackathon, if Algorand is not configured (app_id=0),
-this gracefully returns a mock TX ID and logs a warning.
+When Algorand is not configured (app_id=0), submission is skipped and no
+transaction ID is returned.
 """
 
 import structlog
@@ -37,13 +37,13 @@ def submit_audit_to_algorand(
     action: str,
     violation_type: str,
     payload_hash: str,
-) -> str:
+) -> str | None:
     """Submit a violation or approval log to the Algorand smart contract."""
     if settings.algorand_app_id == 0:
         logger.warning(
             "algorand_not_configured", msg="Skipping chain submission (app_id=0)"
         )
-        return f"mock_tx_{audit_log_id[:8]}"
+        return None
 
     client = _get_client()
     address, private_key = _get_sender_info()
@@ -72,13 +72,13 @@ def submit_audit_to_algorand(
     return tx_id
 
 
-def register_policy_on_algorand(policy_id: str, policy_hash: str) -> str:
+def register_policy_on_algorand(policy_id: str, policy_hash: str) -> str | None:
     """Register a policy hash on-chain for tamper-proof verification."""
     if settings.algorand_app_id == 0:
         logger.warning(
             "algorand_not_configured", msg="Skipping policy registration (app_id=0)"
         )
-        return f"mock_tx_policy_{policy_id[:8]}"
+        return None
 
     client = _get_client()
     address, private_key = _get_sender_info()
