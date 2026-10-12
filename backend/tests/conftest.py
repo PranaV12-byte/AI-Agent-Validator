@@ -11,6 +11,44 @@ from sqlalchemy import create_engine, text
 from app.config import settings
 from app.main import app as fastapi_app
 from app.core.rate_limit import limiter
+from app.services.guardrails.injection_detector import injection_detector
+from tests.safety_guard import UnsafeTestEnvironment, validate_test_environment
+
+
+class _SafeTestTokenizer:
+    """Bounded character-offset fake; test behavior only, not model readiness."""
+
+    is_fast = True
+    model_max_length = 512
+
+    def num_special_tokens_to_add(self, pair: bool = False) -> int:
+        return 2
+
+    def __call__(self, text: str, **_kwargs) -> dict[str, list[tuple[int, int]]]:
+        return {
+            "offset_mapping": [(index, index + 1) for index in range(len(text))]
+        }
+
+
+class _SafeTestClassifier:
+    """Test-only safe response paired with coverage-capable fake offsets."""
+
+    tokenizer = _SafeTestTokenizer()
+
+    def __call__(self, _text: str) -> list[dict[str, object]]:
+        return [{"label": "SAFE", "score": 1.0}]
+
+
+def pytest_sessionstart(session) -> None:  # noqa: ARG001
+    """Reject the suite before fixtures can create or delete configured data."""
+    try:
+        validate_test_environment(
+            environment=settings.environment,
+            database_url=settings.database_url,
+            redis_url=settings.redis_url,
+        )
+    except UnsafeTestEnvironment as exc:
+        raise pytest.UsageError(str(exc)) from exc
 
 
 @pytest.fixture(scope="session")
@@ -20,10 +58,16 @@ def app() -> FastAPI:
         yield
 
     fastapi_app.router.lifespan_context = noop_lifespan
+    original_classifier = injection_detector._classifier
+
+    # This fixture supplies deterministic test behavior, not model readiness or
+    # proof that the production classifier is available.
+    injection_detector._classifier = _SafeTestClassifier()
     # Disable rate limiting for the test session so tests don't interfere
     # with each other's per-IP counters (all share 127.0.0.1).
     limiter.enabled = False
-    return fastapi_app
+    yield fastapi_app
+    injection_detector._classifier = original_classifier
 
 
 @pytest.fixture(scope="session")
@@ -113,6 +157,11 @@ def make_policy(client: TestClient):
         rule_text: str = "test-block",
         name: str | None = None,
     ) -> dict:
+        parameters = {
+            "keyword": {"keyword": rule_text},
+            "regex_match": {"pattern": rule_text},
+            "llm_eval": {"rubric": rule_text},
+        }.get(rule_type)
         resp = client.post(
             "/api/v1/policies/",
             headers=jwt_headers,
@@ -120,6 +169,7 @@ def make_policy(client: TestClient):
                 "name": name or f"policy-{uuid4()}",
                 "rule_type": rule_type,
                 "rule_text": rule_text,
+                "parameters": parameters,
                 "is_enabled": True,
             },
         )

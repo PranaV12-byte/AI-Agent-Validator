@@ -56,8 +56,8 @@ def _get_latest_audit(client: TestClient, token: str) -> dict | None:
 # 2B-1: session_id handling
 # ---------------------------------------------------------------------------
 
-def test_validate_with_session_id_appears_in_audit_log(client: TestClient) -> None:
-    """session_id passed in request → recorded in audit log."""
+def test_session_id_is_pseudonymized_in_audit_log(client: TestClient) -> None:
+    """A correlation ID is stable but the caller's literal is not persisted."""
     auth = _signup(client)
     _set_config(client, auth["access_token"], {
         "global_block_enabled": False,
@@ -75,7 +75,8 @@ def test_validate_with_session_id_appears_in_audit_log(client: TestClient) -> No
 
     log = _get_latest_audit(client, auth["access_token"])
     assert log is not None
-    assert log["session_id"] == session_id
+    assert log["session_id"].startswith("id_")
+    assert log["session_id"] != session_id
 
 
 def test_validate_without_session_id_creates_audit_log(client: TestClient) -> None:
@@ -356,8 +357,8 @@ def test_sanitize_missing_api_key_returns_401(client: TestClient) -> None:
 # 2B-8: Audit log content quality
 # ---------------------------------------------------------------------------
 
-def test_audit_log_contains_processing_ms_gt_zero(client: TestClient) -> None:
-    """Check call → audit log processing_ms is a positive number."""
+def test_audit_log_contains_nonnegative_processing_ms(client: TestClient) -> None:
+    """Integer milliseconds may round sub-millisecond work down to zero."""
     auth = _signup(client)
     _set_config(client, auth["access_token"], {
         "global_block_enabled": False,
@@ -374,7 +375,7 @@ def test_audit_log_contains_processing_ms_gt_zero(client: TestClient) -> None:
 
     log = _get_latest_audit(client, auth["access_token"])
     assert log is not None
-    assert log["processing_ms"] > 0
+    assert log["processing_ms"] >= 0
 
 
 def test_audit_log_input_preview_is_truncation_of_message(client: TestClient) -> None:

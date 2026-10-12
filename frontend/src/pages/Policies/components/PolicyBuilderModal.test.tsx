@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 const defaultModalProps = {
@@ -88,5 +88,109 @@ describe("PolicyBuilderModal", () => {
     render(<PolicyBuilderModal {...defaultModalProps} />)
     expect(screen.queryByRole("button", { name: /^Close$/ })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /close/i })).toBeInTheDocument()
+  })
+
+  it("preserves selected PII categories when editing and saving", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <PolicyBuilderModal
+        mode="edit"
+        policy={{
+          id: "synthetic-pii-policy",
+          tenant_id: "synthetic-tenant",
+          name: "PII rule",
+          description: null,
+          rule_text: "Redact contact details",
+          rule_type: "pii_redaction",
+          parameters: { pii_types: ["email", "upi"] },
+          is_enabled: true,
+          version: 1,
+          policy_hash: null,
+          algorand_tx_id: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }}
+        isOpen={true}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    )
+
+    expect(screen.getByLabelText("Redact Email")).toBeChecked()
+    expect(screen.getByLabelText("Redact UPI ID")).toBeChecked()
+    expect(screen.getByLabelText("Redact PAN")).not.toBeChecked()
+    fireEvent.click(screen.getByTestId("policy-save-button"))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    expect(onSave.mock.calls[0][0].parameters).toEqual({ pii_types: ["email", "upi"] })
+  })
+
+  it("preserves injection sensitivity when editing and saving", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <PolicyBuilderModal
+        mode="edit"
+        policy={{
+          id: "synthetic-injection-policy",
+          tenant_id: "synthetic-tenant",
+          name: "Injection rule",
+          description: null,
+          rule_text: "Detect prompt injection",
+          rule_type: "prompt_injection",
+          parameters: { sensitivity: "strict" },
+          is_enabled: true,
+          version: 1,
+          policy_hash: null,
+          algorand_tx_id: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }}
+        isOpen={true}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    )
+
+    expect(screen.getByTestId("policy-injection-sensitivity")).toHaveValue("strict")
+    fireEvent.click(screen.getByTestId("policy-save-button"))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    expect(onSave.mock.calls[0][0].parameters).toEqual({ sensitivity: "strict" })
+  })
+
+  it("preserves a semantic threshold when editing and saving", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <PolicyBuilderModal
+        mode="edit"
+        policy={{
+          id: "synthetic-semantic-policy",
+          tenant_id: "synthetic-tenant",
+          name: "Meaning rule",
+          description: null,
+          rule_text: "Avoid disclosure of a synthetic secret",
+          rule_type: "semantic",
+          parameters: { threshold: 0.82 },
+          is_enabled: true,
+          version: 1,
+          policy_hash: null,
+          algorand_tx_id: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }}
+        isOpen={true}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    )
+
+    expect(screen.getByTestId("policy-semantic-threshold")).toHaveValue(0.82)
+    fireEvent.click(screen.getByTestId("policy-save-button"))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    expect(onSave.mock.calls[0][0].parameters).toEqual({ threshold: 0.82 })
   })
 })

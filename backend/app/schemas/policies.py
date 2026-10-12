@@ -1,6 +1,7 @@
 """Pydantic schemas for policy APIs."""
 
 import re
+import math
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -17,12 +18,26 @@ PolicyRuleType = (
     "pii_redaction",
     "prompt_injection",
 )
+SUPPORTED_PII_TYPES = frozenset({"aadhaar", "pan", "email", "phone", "upi"})
+MAX_KEYWORD_CHARS = 256
+MAX_REGEX_PATTERN_CHARS = 256
+MAX_LLM_RUBRIC_CHARS = 600
 
 
-def _validate_rule_parameters(
+def validate_rule_parameters(
     rule_type: str, parameters: dict[str, Any] | None
 ) -> None:
     params = parameters or {}
+
+    if rule_type == "semantic" and "threshold" in params:
+        threshold = params["threshold"]
+        if (
+            isinstance(threshold, bool)
+            or not isinstance(threshold, (int, float))
+            or not math.isfinite(float(threshold))
+            or not 0 <= threshold <= 1
+        ):
+            raise ValueError("semantic threshold must be a finite number from 0 to 1")
 
     if rule_type == "regex_match":
         pattern = params.get("pattern")
@@ -30,16 +45,57 @@ def _validate_rule_parameters(
             raise ValueError(
                 "regex_match requires parameters.pattern as non-empty string"
             )
+        if len(pattern) > MAX_REGEX_PATTERN_CHARS:
+            raise ValueError(
+                f"regex_match pattern must be at most {MAX_REGEX_PATTERN_CHARS} characters"
+            )
+        try:
+            re.compile(pattern, re.IGNORECASE)
+        except re.error as exc:
+            raise ValueError("regex_match pattern is invalid") from exc
 
     if rule_type == "llm_eval":
         rubric = params.get("rubric")
         if not isinstance(rubric, str) or not rubric.strip():
             raise ValueError("llm_eval requires parameters.rubric as non-empty string")
+        if len(rubric) > MAX_LLM_RUBRIC_CHARS:
+            raise ValueError(
+                f"llm_eval rubric must be at most {MAX_LLM_RUBRIC_CHARS} characters"
+            )
 
     if rule_type == "keyword":
         keyword = params.get("keyword")
         if not isinstance(keyword, str) or not keyword.strip():
             raise ValueError("keyword requires parameters.keyword as non-empty string")
+        if len(keyword) > MAX_KEYWORD_CHARS:
+            raise ValueError(
+                f"keyword must be at most {MAX_KEYWORD_CHARS} characters"
+            )
+
+    if rule_type == "pii_redaction":
+        pii_types = params.get("pii_types", sorted(SUPPORTED_PII_TYPES))
+        if (
+            not isinstance(pii_types, list)
+            or not pii_types
+            or any(
+                not isinstance(pii_type, str) or pii_type not in SUPPORTED_PII_TYPES
+                for pii_type in pii_types
+            )
+        ):
+            raise ValueError(
+                "pii_redaction requires parameters.pii_types from the supported categories"
+            )
+
+    if rule_type == "prompt_injection":
+        sensitivity = params.get("sensitivity", "moderate")
+        if not isinstance(sensitivity, str) or sensitivity not in {
+            "strict",
+            "moderate",
+            "lenient",
+        }:
+            raise ValueError(
+                "prompt_injection sensitivity must be strict, moderate, or lenient"
+            )
 
 
 class PolicyCreate(BaseModel):
@@ -63,7 +119,7 @@ class PolicyCreate(BaseModel):
     def validate_rule_parameters(self) -> "PolicyCreate":
         if self.rule_type not in PolicyRuleType:
             raise ValueError("Unsupported rule_type")
-        _validate_rule_parameters(self.rule_type, self.parameters)
+        validate_rule_parameters(self.rule_type, self.parameters)
         return self
 
 
@@ -90,11 +146,10 @@ class PolicyUpdate(BaseModel):
         if self.rule_type is not None and self.rule_type not in PolicyRuleType:
             raise ValueError("Unsupported rule_type")
 
-        if self.parameters is not None and self.rule_type is None:
-            raise ValueError("rule_type must be provided when parameters are updated")
-
-        if self.rule_type is not None:
-            _validate_rule_parameters(self.rule_type, self.parameters)
+        if self.rule_type is not None and "parameters" in self.model_fields_set:
+            validate_rule_parameters(self.rule_type, self.parameters)
+        # The current type/parameters live in the database; the CRUD adapter
+        # validates the merged pair when either field is updated independently.
 
         return self
 

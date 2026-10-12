@@ -22,6 +22,9 @@ class CheckResponse(BaseModel):
     violations: list[dict[str, Any]]
     processing_ms: int
     audit_id: UUID
+    evaluation_status: str = "allowed"
+    error_code: str | None = None
+    evaluation_failures: list[str] = Field(default_factory=list)
 
 
 class SanitizeRequest(BaseModel):
@@ -35,9 +38,13 @@ class SanitizeResponse(BaseModel):
     """Response returned by the /hooks/sanitize endpoint."""
 
     sanitized_message: str
-    redactions: list[dict[str, str]]
+    redactions: list[dict[str, Any]]
     processing_ms: int
     audit_id: UUID
+    action: str = "ALLOWED"
+    evaluation_status: str = "allowed"
+    error_code: str | None = None
+    evaluation_failures: list[str] = Field(default_factory=list)
 
 
 class ValidateRequest(BaseModel):
@@ -53,3 +60,6 @@ class ValidateResponse(BaseModel):
     action: str
     reason: str
     redacted_text: str | None = None
+    evaluation_status: str = "allowed"
+    error_code: str | None = None
+    evaluation_failures: list[str] = Field(default_factory=list)

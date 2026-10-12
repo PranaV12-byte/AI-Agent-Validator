@@ -16,7 +16,7 @@ const RULE_TYPE_OPTIONS: Array<{ label: string; value: PolicyRuleType; descripti
   {
     label: "Hide Personal Info",
     value: "pii_redaction",
-    description: "Automatically hide names, emails, phone numbers, and other personal details from messages.",
+    description: "Redact Aadhaar, PAN, email, Indian phone numbers, and UPI IDs from messages.",
   },
   {
     label: "Block Manipulation",
@@ -45,6 +45,16 @@ const RULE_TYPE_OPTIONS: Array<{ label: string; value: PolicyRuleType; descripti
   },
 ]
 
+const PII_TYPE_OPTIONS = [
+  { label: "Aadhaar", value: "aadhaar" },
+  { label: "PAN", value: "pan" },
+  { label: "Email", value: "email" },
+  { label: "Phone", value: "phone" },
+  { label: "UPI ID", value: "upi" },
+]
+const DEFAULT_PII_TYPES = PII_TYPE_OPTIONS.map((option) => option.value)
+const INJECTION_SENSITIVITIES = ["strict", "moderate", "lenient"] as const
+
 function PolicyBuilderModal({
   mode,
   policy,
@@ -62,6 +72,21 @@ function PolicyBuilderModal({
   )
   const [llmRubric, setLlmRubric] = useState(String(policy?.parameters?.rubric ?? ""))
   const [keyword, setKeyword] = useState(String(policy?.parameters?.keyword ?? ""))
+  const [piiTypes, setPiiTypes] = useState<string[]>(() => {
+    const configured = policy?.parameters?.pii_types
+    return Array.isArray(configured)
+      ? configured.filter((value): value is string => typeof value === "string")
+      : DEFAULT_PII_TYPES
+  })
+  const [injectionSensitivity, setInjectionSensitivity] = useState(
+    String(policy?.parameters?.sensitivity ?? "moderate"),
+  )
+  const [semanticThreshold, setSemanticThreshold] = useState(() => {
+    const configured = policy?.parameters?.threshold
+    return typeof configured === "number" && Number.isFinite(configured)
+      ? String(configured)
+      : ""
+  })
 
   useEffect(() => {
     setName(policy?.name ?? "")
@@ -71,6 +96,22 @@ function PolicyBuilderModal({
     setRegexPattern(String(policy?.parameters?.pattern ?? ""))
     setLlmRubric(String(policy?.parameters?.rubric ?? ""))
     setKeyword(String(policy?.parameters?.keyword ?? ""))
+    const configuredPiiTypes = policy?.parameters?.pii_types
+    setPiiTypes(
+      Array.isArray(configuredPiiTypes)
+        ? configuredPiiTypes.filter((value): value is string => typeof value === "string")
+        : DEFAULT_PII_TYPES,
+    )
+    const configuredSensitivity = policy?.parameters?.sensitivity
+    setInjectionSensitivity(
+      typeof configuredSensitivity === "string" ? configuredSensitivity : "moderate",
+    )
+    const configuredThreshold = policy?.parameters?.threshold
+    setSemanticThreshold(
+      typeof configuredThreshold === "number" && Number.isFinite(configuredThreshold)
+        ? String(configuredThreshold)
+        : "",
+    )
   }, [policy, isOpen])
 
   useEffect(() => {
@@ -95,8 +136,35 @@ function PolicyBuilderModal({
     if (ruleType === "keyword" && !keyword.trim()) {
       return true
     }
+    if (ruleType === "pii_redaction" && piiTypes.length === 0) {
+      return true
+    }
+    if (
+      ruleType === "prompt_injection" &&
+      !INJECTION_SENSITIVITIES.includes(
+        injectionSensitivity as (typeof INJECTION_SENSITIVITIES)[number],
+      )
+    ) {
+      return true
+    }
+    if (ruleType === "semantic" && semanticThreshold.trim()) {
+      const value = Number(semanticThreshold)
+      if (!Number.isFinite(value) || value < 0 || value > 1) {
+        return true
+      }
+    }
     return false
-  }, [keyword, llmRubric, name, regexPattern, ruleText, ruleType])
+  }, [
+    injectionSensitivity,
+    keyword,
+    llmRubric,
+    name,
+    piiTypes,
+    regexPattern,
+    ruleText,
+    ruleType,
+    semanticThreshold,
+  ])
 
   async function handleSubmit() {
     const parameters: Record<string, unknown> = {}
@@ -108,6 +176,15 @@ function PolicyBuilderModal({
     }
     if (ruleType === "keyword") {
       parameters.keyword = keyword
+    }
+    if (ruleType === "pii_redaction") {
+      parameters.pii_types = piiTypes
+    }
+    if (ruleType === "prompt_injection") {
+      parameters.sensitivity = injectionSensitivity
+    }
+    if (ruleType === "semantic" && semanticThreshold.trim()) {
+      parameters.threshold = Number(semanticThreshold)
     }
 
     await onSave({
@@ -243,6 +320,83 @@ function PolicyBuilderModal({
               data-testid="policy-keyword"
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
+              className="w-full bg-dashboard-bg border border-border-color rounded-lg px-3 py-2.5 text-sm"
+            />
+          </div>
+        ) : null}
+
+        {ruleType === "pii_redaction" ? (
+          <fieldset className="rounded-lg border border-border-color p-3">
+            <legend className="px-1 text-sm text-text-muted">
+              Personal information to redact
+            </legend>
+            <div className="grid grid-cols-2 gap-3">
+              {PII_TYPE_OPTIONS.map((option) => (
+                <label key={option.value} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    aria-label={`Redact ${option.label}`}
+                    checked={piiTypes.includes(option.value)}
+                    onChange={(event) => {
+                      setPiiTypes((current) =>
+                        event.target.checked
+                          ? [...current, option.value]
+                          : current.filter((value) => value !== option.value),
+                      )
+                    }}
+                    className="accent-brand-green"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+            {piiTypes.length === 0 ? (
+              <p className="mt-2 text-xs text-text-muted">Choose at least one category.</p>
+            ) : null}
+          </fieldset>
+        ) : null}
+
+        {ruleType === "prompt_injection" ? (
+          <div>
+            <label
+              htmlFor="policy-injection-sensitivity"
+              className="block text-sm text-text-muted mb-2"
+            >
+              Detection sensitivity
+            </label>
+            <select
+              id="policy-injection-sensitivity"
+              data-testid="policy-injection-sensitivity"
+              value={injectionSensitivity}
+              onChange={(event) => setInjectionSensitivity(event.target.value)}
+              className="w-full bg-dashboard-bg border border-border-color rounded-lg px-3 py-2.5 text-sm"
+            >
+              {INJECTION_SENSITIVITIES.map((sensitivity) => (
+                <option key={sensitivity} value={sensitivity}>
+                  {sensitivity.charAt(0).toUpperCase() + sensitivity.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
+        {ruleType === "semantic" ? (
+          <div>
+            <label
+              htmlFor="policy-semantic-threshold"
+              className="block text-sm text-text-muted mb-2"
+            >
+              Match threshold (optional, 0 to 1)
+            </label>
+            <input
+              id="policy-semantic-threshold"
+              data-testid="policy-semantic-threshold"
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value={semanticThreshold}
+              onChange={(event) => setSemanticThreshold(event.target.value)}
               className="w-full bg-dashboard-bg border border-border-color rounded-lg px-3 py-2.5 text-sm"
             />
           </div>

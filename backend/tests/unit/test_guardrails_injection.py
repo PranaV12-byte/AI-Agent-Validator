@@ -27,6 +27,33 @@ def _detector_with_mock_classifier(label: str, score: float) -> InjectionDetecto
     return detector
 
 
+class _CharacterOffsetTokenizer:
+    model_max_length = 512
+
+    def num_special_tokens_to_add(self, pair: bool = False) -> int:
+        return 0
+
+    def __call__(self, text: str, **_kwargs):
+        return {"offset_mapping": [(index, index + 1) for index in range(len(text))]}
+
+
+class _WindowClassifier:
+    def __init__(self, marker: str = "") -> None:
+        self.tokenizer = _CharacterOffsetTokenizer()
+        self.marker = marker
+        self.windows: list[str] = []
+
+    def __call__(self, text: str) -> list[dict[str, object]]:
+        self.windows.append(text)
+        is_injection = bool(self.marker and self.marker in text)
+        return [
+            {
+                "label": "INJECTION" if is_injection else "SAFE",
+                "score": 0.99 if is_injection else 0.01,
+            }
+        ]
+
+
 # ---------------------------------------------------------------------------
 # 1A-1: Heuristic patterns fire with confidence 0.99
 # ---------------------------------------------------------------------------
@@ -58,13 +85,14 @@ def test_heuristic_patterns_match(text: str) -> None:
 
 
 def test_heuristic_non_injection() -> None:
-    """Benign query → is_injection=False, confidence=0.0 (no model loaded)."""
+    """Benign query without a classifier is explicitly heuristic-only."""
     detector = InjectionDetector()
     result = detector.detect("What is the weather today?")
 
     assert result.is_injection is False
     assert result.confidence == 0.0
-    assert result.method == "model"
+    assert result.method == "heuristic_only"
+    assert result.complete is False
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +187,114 @@ def test_text_exactly_512_chars_not_truncated() -> None:
     assert captured[0] == exact_text
 
 
+@pytest.mark.parametrize("position", [500, 2000, 4000, 7900])
+def test_full_text_detection_covers_late_and_overlap_boundary_attacks(position: int) -> None:
+    marker = "SyntheticClassifierOnlyAttack"
+    text = "x" * position + marker + "x" * (8000 - position - len(marker))
+    classifier = _WindowClassifier(marker)
+    detector = InjectionDetector()
+    detector._classifier = classifier
+
+    result = detector.detect_full_text(text)
+
+    assert result.is_injection is True
+    assert result.complete is True
+    assert result.method == "model"
+    assert len(classifier.windows) > 1
+    assert any(marker in window for window in classifier.windows)
+
+
+def test_short_high_token_input_is_split_by_tokens_instead_of_silently_truncated() -> None:
+    marker = "SyntheticClassifierOnlyAttack"
+
+    class HighTokenCountTokenizer:
+        model_max_length = 512
+
+        def num_special_tokens_to_add(self, pair: bool = False) -> int:
+            return 0
+
+        def __call__(self, text: str, **_kwargs):
+            offsets = [
+                (index, index + 1)
+                for index in range(len(text))
+                for _ in range(2)
+            ]
+            return {"offset_mapping": offsets}
+
+    text = "x" * 270 + marker
+    classifier = _WindowClassifier(marker)
+    classifier.tokenizer = HighTokenCountTokenizer()
+    detector = InjectionDetector()
+    detector._classifier = classifier
+
+    result = detector.detect_full_text(text)
+
+    assert result.is_injection is True
+    assert result.complete is True
+    assert len(classifier.windows) == 2
+    assert marker in classifier.windows[-1]
+
+
+def test_exact_model_budget_accounts_for_special_tokens_and_scans_final_text() -> None:
+    marker = "SyntheticClassifierOnlyAttack"
+
+    class SpecialTokenTokenizer(_CharacterOffsetTokenizer):
+        def num_special_tokens_to_add(self, pair: bool = False) -> int:
+            return 2
+
+    text = "x" * (512 - len(marker)) + marker
+    classifier = _WindowClassifier(marker)
+    classifier.tokenizer = SpecialTokenTokenizer()
+    detector = InjectionDetector()
+    detector._classifier = classifier
+
+    result = detector.detect_full_text(text)
+
+    assert len(text) == 512
+    assert result.is_injection is True
+    assert result.complete is True
+    assert marker in classifier.windows[-1]
+
+
+def test_full_text_detection_scans_all_windows_for_benign_control() -> None:
+    text = "ordinary synthetic content " * 250
+    classifier = _WindowClassifier("SyntheticClassifierOnlyAttack")
+    detector = InjectionDetector()
+    detector._classifier = classifier
+
+    result = detector.detect_full_text(text)
+
+    assert result.is_injection is False
+    assert result.complete is True
+    assert len(classifier.windows) > 1
+    assert classifier.windows[0].startswith("ordinary")
+    assert classifier.windows[-1].endswith("content ")
+
+
+def test_full_text_detection_reports_input_and_windowing_limits_as_incomplete() -> None:
+    too_long_classifier = _WindowClassifier("SyntheticClassifierOnlyAttack")
+    too_long_detector = InjectionDetector()
+    too_long_detector._classifier = too_long_classifier
+
+    over_limit = too_long_detector.detect_full_text("x" * 8001)
+    assert over_limit.is_injection is False
+    assert over_limit.complete is False
+    assert over_limit.method == "input_limit"
+    assert too_long_classifier.windows == []
+
+    unwindowable = _detector_with_mock_classifier("SAFE", 0.01)
+    result = unwindowable.detect_full_text("x" * 600)
+    assert result.is_injection is False
+    assert result.complete is False
+    assert result.method == "model_windowing_unavailable"
+
+    unwindowable_short = _detector_with_mock_classifier("SAFE", 1.0)
+    short_result = unwindowable_short.detect_full_text("ordinary short input")
+    assert short_result.is_injection is False
+    assert short_result.complete is False
+    assert short_result.method == "model_windowing_unavailable"
+
+
 # ---------------------------------------------------------------------------
 # 1A-4: Edge-case inputs
 # ---------------------------------------------------------------------------
@@ -213,11 +349,12 @@ def test_is_ready_after_mock_load() -> None:
 
 
 def test_detect_without_model_skips_model_inference() -> None:
-    """When model is not loaded, detect() must not raise and returns ALLOWED."""
+    """When model is not loaded, detection is incomplete rather than a pass."""
     detector = InjectionDetector()
     assert detector._classifier is None
     result = detector.detect("Safe message here")
     assert result.is_injection is False
+    assert result.complete is False
 
 
 def test_model_confidence_rounded_to_4_decimals() -> None:

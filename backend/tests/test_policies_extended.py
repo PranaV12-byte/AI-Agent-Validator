@@ -4,6 +4,7 @@ validation edge cases, pagination, and tenant isolation.
 """
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -70,6 +71,94 @@ def test_create_keyword_policy_succeeds(client: TestClient, monkeypatch) -> None
     policy = _create_keyword_policy(client, auth["access_token"])
     assert "id" in policy
     assert policy["rule_type"] == "keyword"
+
+
+def test_nonsemantic_rule_types_create_without_embedding_model(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Every deterministic/external rule type is CRUD-capable without embeddings."""
+    from app.api.v1 import policies as policies_api
+
+    async def fail_if_embedded(*_args, **_kwargs):
+        raise AssertionError("nonsemantic policy attempted to load embeddings")
+
+    monkeypatch.setattr(policies_api.policy_engine, "embed_policy", fail_if_embedded)
+    monkeypatch.setattr(
+        policies_api.register_policy_on_chain_task,
+        "delay",
+        _fake_delay,
+    )
+    auth = _signup(client)
+    definitions = (
+        ("keyword", {"keyword": "synthetic phrase"}),
+        ("regex_match", {"pattern": r"\bsynthetic\b"}),
+        ("llm_eval", {"rubric": "Apply this synthetic criterion."}),
+        ("pii_redaction", {"pii_types": ["email"]}),
+        ("prompt_injection", {"sensitivity": "moderate"}),
+    )
+
+    for rule_type, parameters in definitions:
+        response = client.post(
+            "/api/v1/policies/",
+            headers=_auth_headers(auth["access_token"]),
+            json={
+                "name": f"{rule_type}-{uuid4()}",
+                "rule_text": "synthetic policy definition",
+                "rule_type": rule_type,
+                "parameters": parameters,
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["rule_type"] == rule_type
+
+
+def test_policy_parameter_and_type_updates_rehash_without_semantic_embedding(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    from app.api.v1 import policies as policies_api
+
+    async def fail_if_embedded(*_args, **_kwargs):
+        raise AssertionError("nonsemantic policy attempted to load embeddings")
+
+    monkeypatch.setattr(policies_api.policy_engine, "embed_policy", fail_if_embedded)
+    monkeypatch.setattr(
+        policies_api.register_policy_on_chain_task,
+        "delay",
+        _fake_delay,
+    )
+    auth = _signup(client)
+    policy = _create_keyword_policy(client, auth["access_token"], keyword="alpha")
+
+    parameter_update = client.put(
+        f"/api/v1/policies/{policy['id']}",
+        headers=_auth_headers(auth["access_token"]),
+        json={"parameters": {"keyword": "beta"}},
+    )
+    assert parameter_update.status_code == 200
+    after_parameters = parameter_update.json()
+    assert after_parameters["parameters"] == {"keyword": "beta"}
+    assert after_parameters["version"] == policy["version"] + 1
+    assert after_parameters["policy_hash"] != policy["policy_hash"]
+
+    type_update = client.put(
+        f"/api/v1/policies/{policy['id']}",
+        headers=_auth_headers(auth["access_token"]),
+        json={"rule_type": "regex_match", "parameters": {"pattern": r"beta\b"}},
+    )
+    assert type_update.status_code == 200
+    after_type = type_update.json()
+    assert after_type["rule_type"] == "regex_match"
+    assert after_type["version"] == after_parameters["version"] + 1
+    assert after_type["policy_hash"] != after_parameters["policy_hash"]
+
+    invalid_update = client.put(
+        f"/api/v1/policies/{policy['id']}",
+        headers=_auth_headers(auth["access_token"]),
+        json={"parameters": {"pattern": "["}},
+    )
+    assert invalid_update.status_code == 422
 
 
 def test_create_regex_policy_succeeds(client: TestClient, monkeypatch) -> None:
@@ -179,6 +268,25 @@ def test_policy_update_changes_name(client: TestClient, monkeypatch) -> None:
     assert update_resp.json()["name"] == "Updated Name"
 
 
+def test_policy_behavior_update_versions_and_rehashes_policy(client: TestClient, monkeypatch) -> None:
+    _patch(monkeypatch)
+    auth = _signup(client)
+    policy = _create_keyword_policy(client, auth["access_token"], keyword="alpha")
+    before = client.get("/api/v1/auth/me", headers=_auth_headers(auth["access_token"])).json()
+
+    response = client.put(
+        f"/api/v1/policies/{policy['id']}",
+        headers=_auth_headers(auth["access_token"]),
+        json={"is_enabled": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["version"] == policy["version"] + 1
+    assert response.json()["policy_hash"] != policy["policy_hash"]
+    after = client.get("/api/v1/auth/me", headers=_auth_headers(auth["access_token"])).json()
+    assert after["active_policy_version"] == before["active_policy_version"] + 1
+
+
 def test_policy_delete_removes_from_list(client: TestClient, monkeypatch) -> None:
     """Delete → policy no longer appears in list."""
     _patch(monkeypatch)
@@ -195,6 +303,8 @@ def test_policy_delete_removes_from_list(client: TestClient, monkeypatch) -> Non
     list_resp = client.get("/api/v1/policies/", headers=_auth_headers(auth["access_token"]))
     ids = [p["id"] for p in list_resp.json()["policies"]]
     assert policy_id not in ids
+    profile = client.get("/api/v1/auth/me", headers=_auth_headers(auth["access_token"])).json()
+    assert profile["active_policy_version"] == 2
 
 
 def test_policy_delete_nonexistent_returns_404(client: TestClient, monkeypatch) -> None:

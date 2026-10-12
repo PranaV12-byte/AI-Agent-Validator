@@ -6,6 +6,7 @@ via pydantic-settings. A single module-level `settings` singleton
 is created so every module imports the same object.
 """
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -69,6 +70,14 @@ class Settings(BaseSettings):
     # Policy engine
     policy_similarity_threshold: float = 0.65
     policy_max_top_k: int = 20
+
+    # Groq is optional; the local prototype must continue to start without a key.
+    groq_api_key: str = ""
+    groq_live_enabled: bool = False
+    groq_free_plan_confirmed: bool = False
+    groq_model: str = "openai/gpt-oss-20b"
+    groq_timeout_seconds: float = Field(default=20.0, ge=1.0, le=20.0)
+    groq_max_completion_tokens: int = Field(default=1024, ge=64, le=1024)
 
     # CORS — comma-separated origins or JSON array string
     # Example: CORS_ORIGINS='["https://app.example.com"]'

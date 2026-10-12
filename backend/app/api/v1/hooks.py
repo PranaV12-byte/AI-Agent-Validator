@@ -1,10 +1,8 @@
 """SDK-facing endpoints: /check and /sanitize."""
 
 import asyncio
-import hashlib
 import time
 from uuid import UUID
-from collections.abc import Callable
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
@@ -25,36 +23,18 @@ from app.schemas.hooks import (
     ValidateRequest,
     ValidateResponse,
 )
-from app.services.guardrails import injection_detector, pii_redactor, policy_engine
+from app.services.guardrails.audit_safety import (
+    make_safe_audit_evidence,
+    pseudonymize_audit_identifier,
+    sanitize_audit_metadata,
+)
+from app.services.guardrails.pipeline import GuardrailEvaluation, evaluate_guardrails
 from app.services.perf_trace import emit_timing, should_trace
 from app.worker import submit_to_chain_task
-from starlette.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/hooks", tags=["SDK Hooks"])
 validate_router = APIRouter(tags=["SDK Hooks"])
 logger = structlog.get_logger()
-
-
-def _elapsed_ms(started: float) -> int:
-    return int((time.perf_counter() - started) * 1000)
-
-
-async def _timed_threadpool_call(
-    call: Callable[[], object],
-    *,
-    trace_enabled: bool,
-    event_name: str,
-    tenant_id: UUID,
-) -> object:
-    started = time.perf_counter() if trace_enabled else 0.0
-    result = await run_in_threadpool(call)
-    if trace_enabled:
-        emit_timing(
-            event_name,
-            tenant_id=str(tenant_id),
-            elapsed_ms=_elapsed_ms(started),
-        )
-    return result
 
 
 async def _get_safety_config(db: AsyncSession, tenant_id: UUID) -> SafetyConfig:
@@ -68,68 +48,152 @@ async def _get_safety_config(db: AsyncSession, tenant_id: UUID) -> SafetyConfig:
     return config
 
 
+def _audit_action(evaluation: GuardrailEvaluation) -> str:
+    return {
+        "allow": "ALLOWED",
+        "redact": "REDACTED",
+        "block": "BLOCKED",
+    }[evaluation.action]
+
+
+def _freeze_guardrail_request_context(
+    tenant: Tenant,
+) -> tuple[UUID, int]:
+    """Copy identity/version before an evaluator may recover a failed SQL savepoint."""
+    return UUID(str(tenant.id)), int(tenant.active_policy_version)
+
+
+def _response_violations(evaluation: GuardrailEvaluation) -> list[dict[str, object]]:
+    response: list[dict[str, object]] = []
+    for finding in evaluation.violations:
+        if finding["type"] == "pii_detected":
+            for pii_type, count in evaluation.redaction_counts.items():
+                response.append({"type": f"pii_{pii_type}", "count": count})
+            continue
+        response.append(dict(finding))
+    return response
+
+
+def _build_audit_log(
+    *,
+    tenant_id: UUID,
+    session_id: str | None,
+    hook_type: str,
+    message: str,
+    evaluation: GuardrailEvaluation,
+    processing_ms: int,
+    user_agent: str | None,
+) -> AuditLog:
+    evidence = make_safe_audit_evidence(message)
+    violations = _response_violations(evaluation)
+    violation_type = (
+        str(evaluation.violations[0]["type"])
+        if evaluation.violations
+        else "evaluation_error"
+        if evaluation.status == "evaluation_failed"
+        else None
+    )
+    severity = (
+        "critical"
+        if evaluation.status == "blocked"
+        else "high"
+        if evaluation.status in ("redacted", "evaluation_failed")
+        else "low"
+    )
+    return AuditLog(
+        tenant_id=tenant_id,
+        session_id=pseudonymize_audit_identifier(
+            session_id,
+            namespace=f"session:{tenant_id}",
+        ),
+        hook_type=hook_type,
+        action=_audit_action(evaluation),
+        violation_type=violation_type,
+        severity=severity,
+        input_preview=evidence.input_preview,
+        details={
+            "evaluation_status": evaluation.status,
+            "error_code": evaluation.error_code,
+            "evaluation_failures": list(evaluation.failure_codes),
+            "reason": evaluation.reason,
+            "violations": violations,
+            "redaction_counts": evidence.redaction_counts,
+            "policy_version": evaluation.policy_version,
+            "policy_snapshot_hash": evaluation.policy_snapshot_hash,
+        },
+        payload_hash=evidence.payload_hash,
+        policy_version=evaluation.policy_version,
+        processing_ms=processing_ms,
+        # Raw client IPs are identifying data; omit them from new audit records.
+        ip_address=None,
+        user_agent=sanitize_audit_metadata(user_agent),
+    )
+
+
+def _enqueue_chain_best_effort(audit_log: AuditLog, evaluation: GuardrailEvaluation) -> None:
+    if evaluation.status not in ("blocked", "redacted") or not audit_log.payload_hash:
+        return
+    try:
+        submit_to_chain_task.delay(
+            str(audit_log.id),
+            audit_log.action,
+            audit_log.violation_type or "unknown",
+            audit_log.payload_hash,
+        )
+    except Exception as exc:
+        logger.warning(
+            "optional_chain_enqueue_failed",
+            audit_log_id=str(audit_log.id),
+            error_type=type(exc).__name__,
+        )
+
+
 async def _insert_validate_audit_log(
     tenant_id: UUID,
     user_id: str | None,
-    action: str,
-    reason: str,
     prompt: str,
+    evaluation: GuardrailEvaluation,
     latency_ms: int,
-    risk_score: float,
-    triggered_rules: list[str],
     request: Request,
 ) -> None:
     """Write validate endpoint telemetry into audit logs, with retry on transient failure."""
-    payload_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-    violation_type = triggered_rules[0] if triggered_rules else None
-    severity = (
-        "critical" if action == "block" else "medium" if action == "flag" else "low"
-    )
-    ip_address = request.client.host if request.client else None
+    action = evaluation.action
     user_agent = request.headers.get("user-agent")
 
     for attempt in range(3):
         try:
             async with AsyncSessionLocal() as db:
-                log = AuditLog(
+                log = _build_audit_log(
                     tenant_id=tenant_id,
                     session_id=user_id,
                     hook_type="access",
-                    action="BLOCKED" if action == "block" else "ALLOWED",
-                    violation_type=violation_type,
-                    severity=severity,
-                    input_preview=prompt[:200],
-                    details={
-                        "endpoint_called": "/api/v1/validate",
-                        "latency_ms": latency_ms,
-                        "risk_score": risk_score,
-                        "action_taken": action,
-                        "triggered_rules": triggered_rules,
-                        "reason": reason,
-                    },
-                    payload_hash=payload_hash,
+                    message=prompt,
+                    evaluation=evaluation,
                     processing_ms=latency_ms,
-                    ip_address=ip_address,
                     user_agent=user_agent,
                 )
+                log.details = {
+                    **(log.details or {}),
+                    "endpoint_called": "/api/v1/validate",
+                }
                 db.add(log)
                 await db.commit()
             return
         except Exception as exc:
             if attempt == 2:
-                logger.exception(
+                logger.error(
                     "validate_audit_insert_failed",
                     tenant_id=str(tenant_id),
                     action=action,
                     attempt=attempt,
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
             else:
                 logger.warning(
                     "validate_audit_insert_retry",
                     tenant_id=str(tenant_id),
                     attempt=attempt,
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
                 await asyncio.sleep(2**attempt)
 
@@ -147,82 +211,47 @@ async def validate_prompt(
     """Unified high-performance guardrail validation endpoint."""
     start = time.monotonic()
     trace_enabled = should_trace()
-    config = await _get_safety_config(db, tenant.id)
-
-    triggered_rules: list[str] = []
-    redacted_text: str | None = None
-    reason = "Allowed"
-    max_risk_score = 0.0
-
-    sensitivity_thresholds = {
-        "strict": 0.6,
-        "moderate": 0.7,
-        "lenient": 0.8,
-    }
-
-    if config.injection_protection:
-        injection_result = await _timed_threadpool_call(
-            lambda: injection_detector.detect(
-                body.prompt, config.injection_sensitivity
-            ),
-            trace_enabled=trace_enabled,
-            event_name="perf.validate.injection_detect",
-            tenant_id=tenant.id,
-        )
-        if injection_result.is_injection:
-            triggered_rules.append("prompt_injection")
-            max_risk_score = max(max_risk_score, float(injection_result.confidence))
-            reason = "Prompt Injection Detected"
-
-    if config.pii_redaction:
-        pii_result = await _timed_threadpool_call(
-            lambda: pii_redactor.redact(body.prompt, config.pii_types),
-            trace_enabled=trace_enabled,
-            event_name="perf.validate.pii_redact",
-            tenant_id=tenant.id,
-        )
-        if pii_result.pii_found:
-            triggered_rules.append("pii_detected")
-            max_risk_score = max(max_risk_score, 0.9)
-            redacted_text = pii_result.sanitized_text
-            if reason == "Allowed":
-                reason = "PII Detected"
-
-    threshold = sensitivity_thresholds.get(config.injection_sensitivity, 0.7)
-    if triggered_rules and max_risk_score >= threshold:
-        action = "block" if config.fail_mode == "closed" else "flag"
-    else:
-        action = "allow"
-
-    if action == "allow" and redacted_text:
-        action = "flag" if config.fail_mode == "open" else "block"
+    tenant_id, policy_version = _freeze_guardrail_request_context(tenant)
+    config = await _get_safety_config(db, tenant_id)
+    evaluation = await evaluate_guardrails(
+        db,
+        tenant_id,
+        policy_version,
+        config,
+        body.prompt,
+    )
 
     latency_ms = int((time.monotonic() - start) * 1000)
     if trace_enabled:
         emit_timing(
             "perf.validate.total",
-            tenant_id=str(tenant.id),
+            tenant_id=str(tenant_id),
             elapsed_ms=latency_ms,
-            action=action,
-            triggered_rules=triggered_rules,
+            action=evaluation.action,
+            status=evaluation.status,
+            violations=[item["type"] for item in evaluation.violations],
         )
     background_tasks.add_task(
         _insert_validate_audit_log,
-        tenant.id,
+        tenant_id,
         body.user_id,
-        action,
-        reason,
         body.prompt,
+        evaluation,
         latency_ms,
-        max_risk_score,
-        triggered_rules,
         request,
     )
 
     return ValidateResponse(
-        action=action,
-        reason=reason,
-        redacted_text=redacted_text,
+        action=evaluation.action,
+        reason=evaluation.reason,
+        redacted_text=(
+            evaluation.safe_text
+            if evaluation.redaction_counts
+            else None
+        ),
+        evaluation_status=evaluation.status,
+        error_code=evaluation.error_code,
+        evaluation_failures=list(evaluation.failure_codes),
     )
 
 
@@ -237,152 +266,59 @@ async def check_message(
     """Run all configured safety checks and return a guardrail decision."""
     start = time.monotonic()
     trace_enabled = should_trace()
-    violations: list[dict[str, str | float]] = []
-    action = "ALLOWED"
-    violation_type: str | None = None
-    severity = "low"
-    sanitized_message: str | None = None
-
-    config = await _get_safety_config(db, tenant.id)
-
-    if config.global_block_enabled:
-        processing_ms = int((time.monotonic() - start) * 1000)
-        payload_hash = hashlib.sha256(body.message.encode("utf-8")).hexdigest()
-        audit_log = AuditLog(
-            tenant_id=tenant.id,
-            session_id=body.session_id,
-            hook_type="pre_execution",
-            action="BLOCKED",
-            violation_type="global_block",
-            severity="critical",
-            input_preview=body.message[:200],
-            details={"reason": "global_block_enabled"},
-            payload_hash=payload_hash,
-            policy_version=tenant.active_policy_version,
-            processing_ms=processing_ms,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-        )
-        db.add(audit_log)
-        await db.commit()
-        await db.refresh(audit_log)
-
-        submit_to_chain_task.delay(
-            str(audit_log.id),
-            "BLOCKED",
-            "global_block",
-            payload_hash,
-        )
-
-        return CheckResponse(
-            action="BLOCKED",
-            original_message=None,
-            sanitized_message=config.fallback_message,
-            violations=[{"type": "global_block", "detail": "Global block is enabled"}],
-            processing_ms=processing_ms,
-            audit_id=audit_log.id,
-        )
-
-    if config.injection_protection:
-        inj_result = await _timed_threadpool_call(
-            lambda: injection_detector.detect(
-                body.message, config.injection_sensitivity
-            ),
-            trace_enabled=trace_enabled,
-            event_name="perf.check.injection_detect",
-            tenant_id=tenant.id,
-        )
-        if inj_result.is_injection:
-            violations.append(
-                {
-                    "type": "prompt_injection",
-                    "confidence": inj_result.confidence,
-                    "method": inj_result.method,
-                    "detail": inj_result.matched_pattern or "Model-detected injection",
-                }
-            )
-            action = "BLOCKED"
-            violation_type = "prompt_injection"
-            severity = "critical"
-
-    if action != "BLOCKED" and config.pii_redaction:
-        pii_result = await _timed_threadpool_call(
-            lambda: pii_redactor.redact(body.message, config.pii_types),
-            trace_enabled=trace_enabled,
-            event_name="perf.check.pii_redact",
-            tenant_id=tenant.id,
-        )
-        if pii_result.pii_found:
-            for redaction in pii_result.redactions:
-                violations.append(
-                    {
-                        "type": f"pii_{redaction.type}",
-                        "detail": f"Detected {redaction.type}: {redaction.original}",
-                    }
-                )
-            action = "REDACTED"
-            violation_type = "pii_detected"
-            severity = "high"
-            sanitized_message = pii_result.sanitized_text
-
-    if action != "BLOCKED" and config.policy_enforcement:
-        text_to_check = sanitized_message or body.message
-        policy_result = await policy_engine.check_message(db, tenant.id, text_to_check)
-        if policy_result.violated:
-            for policy_match in policy_result.matched_policies:
-                violations.append(
-                    {
-                        "type": "policy_violation",
-                        "policy_name": policy_match.policy_name,
-                        "similarity": policy_match.similarity_score,
-                        "detail": f"Matches policy: {policy_match.rule_text[:100]}",
-                    }
-                )
-            action = "BLOCKED"
-            violation_type = "policy_violation"
-            severity = "high"
+    tenant_id, policy_version = _freeze_guardrail_request_context(tenant)
+    config = await _get_safety_config(db, tenant_id)
+    evaluation = await evaluate_guardrails(
+        db,
+        tenant_id,
+        policy_version,
+        config,
+        body.message,
+    )
 
     processing_ms = int((time.monotonic() - start) * 1000)
     if trace_enabled:
         emit_timing(
             "perf.check.total",
-            tenant_id=str(tenant.id),
+            tenant_id=str(tenant_id),
             elapsed_ms=processing_ms,
-            action=action,
+            action=_audit_action(evaluation),
+            status=evaluation.status,
         )
-    payload_hash = hashlib.sha256(body.message.encode("utf-8")).hexdigest()
-
-    audit_log = AuditLog(
-        tenant_id=tenant.id,
+    action = _audit_action(evaluation)
+    audit_log = _build_audit_log(
+        tenant_id=tenant_id,
         session_id=body.session_id,
         hook_type="pre_execution" if action == "BLOCKED" else "post_execution",
-        action=action,
-        violation_type=violation_type,
-        severity=severity,
-        input_preview=(sanitized_message or body.message)[:200],
-        details={"violations": violations},
-        payload_hash=payload_hash,
-        policy_version=tenant.active_policy_version,
+        message=body.message,
+        evaluation=evaluation,
         processing_ms=processing_ms,
-        ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
     db.add(audit_log)
     await db.commit()
     await db.refresh(audit_log)
+    _enqueue_chain_best_effort(audit_log, evaluation)
 
-    if violation_type:
-        submit_to_chain_task.delay(
-            str(audit_log.id), action, violation_type, payload_hash
-        )
+    if action == "BLOCKED":
+        sanitized_message = evaluation.fallback_message
+    elif evaluation.status == "evaluation_failed" and evaluation.fail_mode == "closed":
+        sanitized_message = evaluation.fallback_message
+    elif evaluation.status == "redacted" or evaluation.status == "evaluation_failed":
+        sanitized_message = evaluation.safe_text
+    else:
+        sanitized_message = None
 
     return CheckResponse(
         action=action,
-        original_message=body.message if action == "REDACTED" else None,
+        original_message=None,
         sanitized_message=sanitized_message,
-        violations=violations,
+        violations=_response_violations(evaluation),
         processing_ms=processing_ms,
         audit_id=audit_log.id,
+        evaluation_status=evaluation.status,
+        error_code=evaluation.error_code,
+        evaluation_failures=list(evaluation.failure_codes),
     )
 
 
@@ -394,85 +330,60 @@ async def sanitize_message(
     tenant: Tenant = Depends(get_tenant_by_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> SanitizeResponse:
-    """Apply PII redaction and log the sanitization audit event."""
+    """Run the shared safety pipeline before returning sanitized text."""
     start = time.monotonic()
     trace_enabled = should_trace()
-
-    config = await _get_safety_config(db, tenant.id)
-
-    if config.global_block_enabled:
-        processing_ms = int((time.monotonic() - start) * 1000)
-        audit_log = AuditLog(
-            tenant_id=tenant.id,
-            session_id=body.session_id,
-            hook_type="post_execution",
-            action="BLOCKED",
-            violation_type="global_block",
-            severity="critical",
-            input_preview=body.message[:200],
-            details={"reason": "global_block_enabled"},
-            payload_hash=hashlib.sha256(body.message.encode("utf-8")).hexdigest(),
-            processing_ms=processing_ms,
-            ip_address=request.client.host if request.client else None,
-        )
-        db.add(audit_log)
-        await db.commit()
-        await db.refresh(audit_log)
-
-        return SanitizeResponse(
-            sanitized_message=config.fallback_message,
-            redactions=[],
-            processing_ms=processing_ms,
-            audit_id=audit_log.id,
-        )
-    pii_result = await _timed_threadpool_call(
-        lambda: pii_redactor.redact(
-            body.message,
-            config.pii_types if config.pii_redaction else [],
-        ),
-        trace_enabled=trace_enabled,
-        event_name="perf.sanitize.pii_redact",
-        tenant_id=tenant.id,
+    tenant_id, policy_version = _freeze_guardrail_request_context(tenant)
+    config = await _get_safety_config(db, tenant_id)
+    evaluation = await evaluate_guardrails(
+        db,
+        tenant_id,
+        policy_version,
+        config,
+        body.message,
     )
     processing_ms = int((time.monotonic() - start) * 1000)
     if trace_enabled:
         emit_timing(
             "perf.sanitize.total",
-            tenant_id=str(tenant.id),
+            tenant_id=str(tenant_id),
             elapsed_ms=processing_ms,
+            action=_audit_action(evaluation),
+            status=evaluation.status,
         )
 
-    audit_log = AuditLog(
-        tenant_id=tenant.id,
+    action = _audit_action(evaluation)
+    audit_log = _build_audit_log(
+        tenant_id=tenant_id,
         session_id=body.session_id,
-        hook_type="post_execution",
-        action="REDACTED" if pii_result.pii_found else "ALLOWED",
-        violation_type="pii_detected" if pii_result.pii_found else None,
-        severity="medium" if pii_result.pii_found else "low",
-        input_preview=pii_result.sanitized_text[:200],
-        details={
-            "redactions": [
-                {"type": r.type, "original": r.original} for r in pii_result.redactions
-            ]
-        },
-        payload_hash=hashlib.sha256(body.message.encode("utf-8")).hexdigest(),
+        hook_type="pre_execution" if action == "BLOCKED" else "post_execution",
+        message=body.message,
+        evaluation=evaluation,
         processing_ms=processing_ms,
-        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
     )
     db.add(audit_log)
     await db.commit()
     await db.refresh(audit_log)
+    _enqueue_chain_best_effort(audit_log, evaluation)
+
+    if action == "BLOCKED":
+        sanitized_message = evaluation.fallback_message
+    elif evaluation.status == "evaluation_failed" and evaluation.fail_mode == "closed":
+        sanitized_message = evaluation.fallback_message
+    else:
+        sanitized_message = evaluation.safe_text or ""
 
     return SanitizeResponse(
-        sanitized_message=pii_result.sanitized_text,
+        sanitized_message=sanitized_message,
         redactions=[
-            {
-                "type": r.type,
-                "original": r.original,
-                "replacement": r.replacement,
-            }
-            for r in pii_result.redactions
+            {"type": pii_type, "count": count}
+            for pii_type, count in evaluation.redaction_counts.items()
         ],
         processing_ms=processing_ms,
         audit_id=audit_log.id,
+        action=action,
+        evaluation_status=evaluation.status,
+        error_code=evaluation.error_code,
+        evaluation_failures=list(evaluation.failure_codes),
     )
