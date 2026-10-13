@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-type ActionFilter = "ALL" | "BLOCKED" | "ALLOWED" | "REDACTED"
+type ActionFilter = "ALL" | "BLOCKED" | "ALLOWED" | "REDACTED" | "ERROR"
 
 type AuditFilterBarProps = {
   action: ActionFilter
@@ -74,6 +74,7 @@ function AuditFilterBar({
             <option value="ALLOWED">Allowed</option>
             <option value="BLOCKED">Blocked</option>
             <option value="REDACTED">Redacted</option>
+            <option value="ERROR">Error</option>
           </select>
         </div>
 

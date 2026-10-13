@@ -1,9 +1,20 @@
 """Pydantic schemas for dashboard APIs."""
 
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class DashboardDailyActivity(BaseModel):
+    """One UTC calendar day of distinct request totals."""
+
+    date: date
+    allowed_requests: int
+    redacted_requests: int
+    blocked_requests: int
+    error_requests: int
 
 
 class DashboardStats(BaseModel):
@@ -11,7 +22,11 @@ class DashboardStats(BaseModel):
 
     total_requests: int
     blocked_requests: int
+    allowed_requests: int
+    redacted_requests: int
+    error_requests: int
     avg_latency_ms: float
+    daily_trend: list[DashboardDailyActivity]
 
 
 class DashboardResponse(BaseModel):
@@ -19,21 +34,40 @@ class DashboardResponse(BaseModel):
 
     total_requests: int
     blocked_requests: int
+    allowed_requests: int
+    redacted_requests: int
+    error_requests: int
     avg_latency_ms: float
+    daily_trend: list[DashboardDailyActivity]
 
 
 class SafetyConfigUpdate(BaseModel):
     """Partial update payload for tenant safety configuration."""
 
+    model_config = ConfigDict(extra="forbid")
+
     global_block_enabled: bool | None = None
     injection_protection: bool | None = None
-    injection_sensitivity: str | None = Field(default=None, max_length=20)
+    injection_sensitivity: Literal["strict", "moderate", "lenient"] | None = None
     pii_redaction: bool | None = None
-    pii_types: list[str] | None = None
+    pii_types: list[Literal["aadhaar", "pan", "email", "phone", "upi"]] | None = None
     policy_enforcement: bool | None = None
-    fail_mode: str | None = Field(default=None, max_length=20)
-    fallback_message: str | None = None
-    log_retention_days: int | None = Field(default=None, ge=1)
+    fail_mode: Literal["open", "closed"] | None = None
+    fallback_message: str | None = Field(default=None, max_length=2000)
+    log_retention_days: int | None = Field(default=None, ge=1, le=3650)
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self) -> "SafetyConfigUpdate":
+        null_fields = [
+            name
+            for name in self.model_fields_set
+            if getattr(self, name) is None
+        ]
+        if null_fields:
+            raise ValueError(
+                "Fields cannot be null: " + ", ".join(sorted(null_fields))
+            )
+        return self
 
 
 class SafetyConfigResponse(BaseModel):

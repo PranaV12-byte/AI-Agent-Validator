@@ -282,7 +282,7 @@ def _csv_safe_cell(value: Any) -> str:
 async def list_audit_logs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0, le=10000),
-    action: str | None = Query(None, pattern="^(BLOCKED|ALLOWED|REDACTED)$"),
+    action: str | None = Query(None, pattern="^(BLOCKED|ALLOWED|REDACTED|ERROR)$"),
     start_date: date | None = Query(None, description="Filter logs on or after this date (YYYY-MM-DD)"),
     end_date: date | None = Query(None, description="Filter logs on or before this date (YYYY-MM-DD)"),
     search: str | None = Query(None, max_length=500, description="Filter by input_preview content (case-insensitive)"),
@@ -338,7 +338,7 @@ CSV_FIELDS = [
 
 @router.get("/export")
 async def export_audit_logs(
-    action: str | None = Query(None, pattern="^(BLOCKED|ALLOWED|REDACTED)$"),
+    action: str | None = Query(None, pattern="^(BLOCKED|ALLOWED|REDACTED|ERROR)$"),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     search: str | None = Query(None, max_length=500),

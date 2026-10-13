@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import type { AuditLog } from "../../types/api"
 import { formatTimeAgo } from "../../utils/format"
 
-type IncidentStatus = "BLOCKED" | "ALLOWED" | "REDACTED"
+type IncidentStatus = "BLOCKED" | "ALLOWED" | "REDACTED" | "ERROR"
 
 type Incident = {
   id: string
@@ -21,7 +21,7 @@ type ActivityTableProps = {
 }
 
 function statusClass(status: IncidentStatus): string {
-  if (status === "BLOCKED") {
+  if (status === "BLOCKED" || status === "ERROR") {
     return "bg-brand-red/10 text-brand-red"
   }
 
@@ -32,17 +32,26 @@ function statusClass(status: IncidentStatus): string {
   return "bg-text-muted/10 text-text-muted"
 }
 
+function incidentTypeLabel(log: AuditLog): string {
+  if (log.violation_type) {
+    return log.violation_type.replaceAll("_", " ")
+  }
+  return log.action === "ERROR" ? "Request failed safely" : "General Query"
+}
+
 function toIncident(log: AuditLog): Incident {
   return {
     id: log.id,
     time: formatTimeAgo(log.created_at),
     status: log.action,
-    incidentType: log.violation_type
-      ? log.violation_type.replaceAll("_", " ")
-      : "General Query",
+    incidentType: incidentTypeLabel(log),
     details: log.input_preview ?? "No details",
     latency: `${log.processing_ms ?? 0}ms`,
   }
+}
+
+function statusLabel(status: IncidentStatus): string {
+  return status === "ERROR" ? "ERROR" : status.toLowerCase()
 }
 
 function ActivityTable({ logs, isLoading, error }: ActivityTableProps) {
@@ -127,7 +136,7 @@ function ActivityTable({ logs, isLoading, error }: ActivityTableProps) {
                   <span
                     className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase ${statusClass(incident.status)}`}
                   >
-                    {incident.status.toLowerCase()}
+                    {statusLabel(incident.status)}
                   </span>
                 </td>
                 <td className="px-6 py-5 font-medium">{incident.incidentType}</td>

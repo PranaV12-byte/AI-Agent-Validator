@@ -1,4 +1,4 @@
-import { Ban, CheckCircle2, ShieldCheck, Zap } from "lucide-react"
+import { AlertTriangle, Ban, CheckCircle2, ShieldCheck, Zap } from "lucide-react"
 import type { ComponentType } from "react"
 
 import type { DashboardStats } from "../../types/api"
@@ -30,10 +30,13 @@ function buildKpis(stats: DashboardStats | null): KpiItem[] {
   const values = stats ?? {
     total_requests: 0,
     blocked_requests: 0,
+    allowed_requests: 0,
+    redacted_requests: 0,
+    error_requests: 0,
     avg_latency_ms: 0,
+    daily_trend: [],
   }
 
-  const allowedRequests = Math.max(0, values.total_requests - values.blocked_requests)
   const blockRate = values.total_requests
     ? (values.blocked_requests / values.total_requests) * 100
     : 0
@@ -57,11 +60,19 @@ function buildKpis(stats: DashboardStats | null): KpiItem[] {
     },
     {
       label: "Allowed",
-      value: allowedRequests.toLocaleString(),
-      trend: "Requests allowed",
+      value: values.allowed_requests.toLocaleString(),
+      trend: `${values.redacted_requests.toLocaleString()} redacted separately`,
       trendTone: "green",
       iconTone: "bg-brand-green/10 text-brand-green",
       Icon: CheckCircle2,
+    },
+    {
+      label: "Errors",
+      value: values.error_requests.toLocaleString(),
+      trend: "Incomplete or failed requests",
+      trendTone: values.error_requests ? "red" : "muted",
+      iconTone: "bg-amber-500/10 text-amber-500",
+      Icon: AlertTriangle,
     },
     {
       label: "Check Speed",
@@ -89,7 +100,7 @@ function KpiGrid({ stats, isLoading, error }: KpiGridProps) {
   const kpis = buildKpis(stats)
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6 mb-8">
       {kpis.map((kpi) => (
         <div
           key={kpi.label}

@@ -437,11 +437,8 @@ async def test_unavailable_llm_policy_blocks_even_in_fail_open_mode(monkeypatch)
         ),
     )
 
-    assert result.status == "blocked"
+    assert result.status == "evaluation_failed"
     assert result.action == "block"
     assert result.safe_text is None
     assert result.failure_codes == ("groq_api_key_missing",)
-    assert any(
-        item["type"] == "policy_evaluation_uncertain"
-        for item in result.violations
-    )
+    assert not any(item["type"] == "policy_violation" for item in result.violations)

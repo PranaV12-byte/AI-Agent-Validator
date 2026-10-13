@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi.errors import RateLimitExceeded
 
-from app.api.v1 import audit, auth, dashboard, health, hooks, policies
+from app.api.v1 import audit, auth, dashboard, demo, health, hooks, policies
 from app.config import settings
 from app.core.rate_limit import limiter, rate_limit_exceeded_handler
 from app.core.redis_client import get_redis
@@ -125,16 +125,13 @@ async def lifespan(app: FastAPI):
     if settings.algorand_app_id == 0:
         logger.warning(
             "algorand_mock_mode",
-            msg="algorand_app_id=0: all blockchain writes return MOCK TX IDs. "
-                "Audit logs are NOT immutably recorded on-chain. "
-                "Set ALGORAND_APP_ID to enable real blockchain writes.",
+            msg="Anchoring disabled; audit records are stored locally, not on-chain.",
         )
         if settings.environment == "production":
             logger.warning(
                 "algorand_not_configured",
                 msg="ALGORAND_APP_ID is not set in production. "
-                    "Audit logs will use mock TX IDs and are NOT immutably recorded on-chain. "
-                    "Set ALGORAND_APP_ID and ALGORAND_MNEMONIC to enable blockchain writes.",
+                    "Audit records are stored locally, not on-chain.",
             )
     elif settings.environment == "production" and settings.algorand_network != "mainnet":
         logger.warning(
@@ -153,7 +150,16 @@ async def lifespan(app: FastAPI):
     injection_detector.load_model()
     pii_redactor.load_model()
     policy_engine.load_model()
-    logger.info("startup_complete", msg="All models loaded. Safebot ready.")
+    model_readiness = {
+        "injection_classifier": injection_detector.is_ready,
+        "pii_recognizer": pii_redactor.is_ready,
+        "semantic_policy_model": policy_engine.is_ready,
+    }
+    logger.info(
+        "startup_complete",
+        msg="Safebot startup finished; model availability is reported per check.",
+        model_readiness=model_readiness,
+    )
     yield
     logger.info("shutdown", msg="Safebot shutting down gracefully.")
     await engine.dispose()
@@ -218,6 +224,7 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(hooks.router, prefix="/api/v1")
 app.include_router(hooks.validate_router, prefix="/api/v1")
+app.include_router(demo.router, prefix="/api/v1")
 app.include_router(policies.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")

@@ -59,6 +59,22 @@ describe("ActivityTable", () => {
     expect(screen.queryByText("tiny-secret")).not.toBeInTheDocument()
   })
 
+  it("shows ERROR as a red failure status instead of a general query", () => {
+    render(
+      <MemoryRouter>
+        <ActivityTable
+          logs={[{ ...mockLog, action: "ERROR", violation_type: null }]}
+          isLoading={false}
+          error={null}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText("ERROR")).toHaveClass("bg-brand-red/10", "text-brand-red")
+    expect(screen.getByText("Request failed safely")).toBeInTheDocument()
+    expect(screen.queryByText("General Query")).not.toBeInTheDocument()
+  })
+
   it("navigates to /audit-log when link is clicked", () => {
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>

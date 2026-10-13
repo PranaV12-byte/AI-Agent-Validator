@@ -27,7 +27,12 @@ const navItems: NavItem[] = [
   { to: "/settings", label: "Settings", icon: Settings },
 ]
 
-function Sidebar() {
+type SidebarProps = {
+  mobile?: boolean
+  onNavigate?: () => void
+}
+
+function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const { user, logout } = useAuth()
 
   function handleLogout() {
@@ -37,7 +42,7 @@ function Sidebar() {
 
   return (
     <aside
-      className="w-64 bg-sidebar-bg border-r border-border-color flex flex-col p-6 shrink-0"
+      className={`${mobile ? "w-full min-h-full" : "w-64 border-r"} bg-sidebar-bg border-border-color flex flex-col p-6 shrink-0`}
       data-purpose="sidebar-navigation"
     >
       <div className="flex items-center gap-3 mb-12">
@@ -52,6 +57,7 @@ function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
+            onClick={onNavigate}
             className={({ isActive }) =>
               [
                 "flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all",

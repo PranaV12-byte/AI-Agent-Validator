@@ -15,7 +15,9 @@
 
 The approved synthetic local demo uses its own procedure and isolated database targets. See the [local demo runbook](local-demo-runbook.md) for the current ports, startup steps, persistence rehearsal, and feature evidence. Do not use these steps for production.
 
-The local runbook is the source of truth for demo readiness. Its matrix distinguishes source review from tests and runtime rehearsal; only owner-captured evidence can move a pending item to passed.
+The local runbook is the source of truth for demo readiness. Its matrix distinguishes source review, automated tests, agent-executed synthetic runtime checks and deferred external integrations. Human user validation is not inferred from agent checks.
+
+At the final October 13 checkpoint, both cold API/UI restart rehearsals passed. Backend full-suite evidence is 501 passed followed by a 48-check rerun for the later dashboard/config/cleanup repair. Final frontend suite passed 232 tests and the production build passed. Mobile/desktop Chromium acceptance checks and seven owner-approved synthetic live Groq calls passed; one classifier false positive is documented. This is a working local demo, not a production-readiness sign-off. Consult the runbook before repeating live calls; keep tests provider-disabled and preserve the separate demo/test data targets.
 
 ---
 

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
 import { useAuth } from "../../hooks/useAuth"
+import ProtectedChatPanel from "./components/ProtectedChatPanel"
 
 type SnippetCardProps = {
   title: string
@@ -154,6 +155,8 @@ for (let attempt = 0; attempt < 5; attempt += 1) {
         <h1 className="text-2xl font-bold mb-2">Connect Your AI Tool</h1>
         <p className="text-text-muted">Follow these steps to connect your AI assistant to Safebot. You can share this page with your developer.</p>
       </div>
+
+      <ProtectedChatPanel />
 
       <div className="bg-card-bg border border-border-color rounded-2xl p-6 space-y-4">
         {[

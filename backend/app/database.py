@@ -7,10 +7,13 @@ which commits on success and rolls back on any exception.
 """
 
 from collections.abc import AsyncGenerator
+import asyncio
+import logging
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import ssl as _ssl_module
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -19,6 +22,10 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
+
+MANUAL_COMMIT_REQUEST_STATE_KEY = "safebot_manual_db_commits"
+MANUAL_SESSION_CLEANUP_TIMEOUT_SECONDS = 2.0
+logger = logging.getLogger(__name__)
 
 
 def _build_engine_args(url: str) -> tuple[str, dict]:
@@ -76,12 +83,44 @@ class Base(DeclarativeBase):
 
 
 # ── Dependency ────────────────────────────────────────────────────────────────
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+async def _bounded_session_cleanup(session: AsyncSession, operation: str) -> None:
+    try:
+        async with asyncio.timeout(MANUAL_SESSION_CLEANUP_TIMEOUT_SECONDS):
+            if operation == "rollback":
+                await session.rollback()
+            else:
+                await session.close()
+    except Exception as exc:
+        # A protected-chat response must not hang indefinitely in dependency
+        # teardown after its own bounded audit/processing deadline has elapsed.
+        logger.warning(
+            "manual_database_session_cleanup_failed",
+            extra={"operation": operation, "error_type": type(exc).__name__},
+        )
+
+
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI dependency that yields an async DB session.
 
-    Commits on clean exit; rolls back on any exception; always closes.
+    Commits on clean exit; rolls back on any exception; always closes. Only
+    routes explicitly marked through request.state may manage their own
+    bounded commits; all existing routes retain the default behavior.
     """
+    manual_commits = bool(
+        getattr(request.state, MANUAL_COMMIT_REQUEST_STATE_KEY, False)
+    )
+    if manual_commits:
+        # Avoid AsyncSession's context-manager __aexit__ performing a second,
+        # unbounded close after our timed rollback/close below.
+        session = AsyncSessionLocal()
+        try:
+            yield session
+        finally:
+            await _bounded_session_cleanup(session, "rollback")
+            await _bounded_session_cleanup(session, "close")
+        return
+
     async with AsyncSessionLocal() as session:
         try:
             yield session

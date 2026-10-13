@@ -36,12 +36,12 @@ const RULE_TYPE_OPTIONS: Array<{ label: string; value: PolicyRuleType; descripti
   {
     label: "Word Match",
     value: "keyword",
-    description: "Block or flag any message containing a specific word or phrase you choose.",
+    description: "Block messages containing your selected word or phrase.",
   },
   {
     label: "Meaning Match",
     value: "semantic",
-    description: "Block messages that mean the same thing as your rule, even if worded differently.",
+    description: "Experimental text-similarity match; review results before relying on it.",
   },
 ]
 

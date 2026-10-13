@@ -11,7 +11,12 @@ type AuditDetailDrawerProps = {
 function inferReason(log: AuditLog): string {
   if (log.action === "BLOCKED") return log.violation_type ?? "Blocked by policy"
   if (log.action === "REDACTED") return log.violation_type ?? "Sensitive data redacted"
+  if (log.action === "ERROR") return log.violation_type ?? "Request could not be completed"
   return "Request allowed by guardrails"
+}
+
+function actionLabel(action: AuditLog["action"]): string {
+  return action === "ERROR" ? "ERROR" : action.toLowerCase()
 }
 
 function formatTimestamp(value: string): string {
@@ -101,7 +106,11 @@ function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
 
       <div className="space-y-5 text-sm">
         <Field label="Timestamp">{formatTimestamp(log.created_at)}</Field>
-        <Field label="Action"><span className="uppercase">{log.action.toLowerCase()}</span></Field>
+        <Field label="Action">
+          <span className={`uppercase ${log.action === "ERROR" ? "font-bold text-brand-red" : ""}`}>
+            {actionLabel(log.action)}
+          </span>
+        </Field>
         <Field label="Reason">{inferReason(log)}</Field>
         <Field label="Hook Type">{log.hook_type}</Field>
         <Field label="Severity">{log.severity}</Field>

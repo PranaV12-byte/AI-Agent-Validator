@@ -2,9 +2,11 @@
 Extended dashboard integration tests — stats correctness, 7-day window,
 safety config all-field persistence, and validation edge cases.
 """
-from datetime import timedelta
+import json
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
@@ -39,7 +41,12 @@ def _get_tenant_id(client: TestClient, token: str) -> str:
     return resp.json()["id"]
 
 
-def _seed_log(tenant_id: str, action: str, processing_ms: int, days_ago: float = 0.0) -> None:
+def _seed_log(
+    tenant_id: str,
+    action: str,
+    processing_ms: int | None,
+    days_ago: float = 0.0,
+) -> None:
     """Insert a single audit log with configurable age."""
     sync_url = settings.database_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
     engine = create_engine(sync_url)
@@ -61,6 +68,54 @@ def _seed_log(tenant_id: str, action: str, processing_ms: int, days_ago: float =
             "processing_ms": processing_ms,
             "days_ago_interval": f"{days_ago} days",
         })
+
+
+def _seed_chat_log(
+    tenant_id: str,
+    conversation_id: str,
+    stage: str,
+    action: str,
+    evaluation_status: str,
+    processing_ms: int,
+    *,
+    violations: list[dict] | None = None,
+    failures: list[str] | None = None,
+) -> None:
+    """Insert one protected-chat stage using pseudonymous synthetic correlation."""
+    sync_url = settings.database_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    engine = create_engine(sync_url)
+    insert_sql = text(
+        """
+        INSERT INTO audit_logs (
+            id, tenant_id, session_id, hook_type, action, severity, details,
+            processing_ms, created_at
+        ) VALUES (
+            gen_random_uuid(), :tenant_id, :session_id, :hook_type, :action,
+            'low', CAST(:details AS jsonb), :processing_ms, NOW()
+        )
+        """
+    )
+    with engine.begin() as conn:
+        conn.execute(
+            insert_sql,
+            {
+                "tenant_id": tenant_id,
+                "session_id": f"id_{conversation_id}",
+                "hook_type": f"protected_chat_{stage}",
+                "action": action,
+                "details": json.dumps(
+                    {
+                        "protected_chat": True,
+                        "conversation_id": f"id_{conversation_id}",
+                        "stage": stage,
+                        "evaluation_status": evaluation_status,
+                        "evaluation_failures": failures or [],
+                        "violations": violations or [],
+                    }
+                ),
+                "processing_ms": processing_ms,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -85,15 +140,17 @@ def test_stats_counts_only_own_tenant(client: TestClient) -> None:
     tid_b = _get_tenant_id(client, tenant_b["access_token"])
 
     for _ in range(10):
-        _seed_log(tid_a, "ALLOWED", 50)
+        _seed_log(tid_a, "ALLOWED", 50, days_ago=0.01)
     for _ in range(5):
-        _seed_log(tid_b, "ALLOWED", 50)
+        _seed_log(tid_b, "ALLOWED", 50, days_ago=0.01)
 
     stats_a = client.get("/api/v1/dashboard/stats", headers=_auth_headers(tenant_a["access_token"]))
     stats_b = client.get("/api/v1/dashboard/stats", headers=_auth_headers(tenant_b["access_token"]))
 
     assert stats_a.json()["total_requests"] == 10
     assert stats_b.json()["total_requests"] == 5
+    assert stats_a.json()["allowed_requests"] == 10
+    assert stats_a.json()["error_requests"] == 0
 
 
 def test_stats_7day_window_excludes_older_logs(client: TestClient) -> None:
@@ -124,6 +181,71 @@ def test_stats_blocked_count_is_accurate(client: TestClient) -> None:
     data = resp.json()
     assert data["total_requests"] == 5
     assert data["blocked_requests"] == 2
+    assert data["allowed_requests"] == 3
+
+
+def test_stats_count_protected_chat_once_and_exclude_errors_from_allowed(client: TestClient) -> None:
+    auth = _signup(client)
+    tenant_id = _get_tenant_id(client, auth["access_token"])
+
+    _seed_chat_log(tenant_id, "allowed", "pre", "ALLOWED", "allowed", 10)
+    _seed_chat_log(tenant_id, "allowed", "post", "ALLOWED", "allowed", 15)
+    _seed_chat_log(
+        tenant_id,
+        "blocked",
+        "pre",
+        "BLOCKED",
+        "blocked",
+        20,
+        violations=[{"type": "policy_violation"}],
+    )
+    _seed_chat_log(
+        tenant_id,
+        "error",
+        "pre",
+        "ERROR",
+        "evaluation_failed",
+        25,
+        failures=["llm_judge_uncertain"],
+    )
+    _seed_chat_log(tenant_id, "redacted", "pre", "REDACTED", "redacted", 30)
+    _seed_chat_log(tenant_id, "redacted", "post", "ALLOWED", "allowed", 20)
+    _seed_chat_log(tenant_id, "incomplete", "pre", "ALLOWED", "allowed", 15)
+
+    response = client.get(
+        "/api/v1/dashboard/stats",
+        headers=_auth_headers(auth["access_token"]),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {key: payload[key] for key in (
+        "total_requests",
+        "blocked_requests",
+        "allowed_requests",
+        "redacted_requests",
+        "error_requests",
+        "avg_latency_ms",
+    )} == {
+        "total_requests": 5,
+        "blocked_requests": 1,
+        "allowed_requests": 1,
+        "redacted_requests": 1,
+        "error_requests": 2,
+        "avg_latency_ms": 27.0,
+    }
+    daily = payload["daily_trend"]
+    today = datetime.now(timezone.utc).date()
+    assert len(daily) == 7
+    assert daily[0]["date"] == (today - timedelta(days=6)).isoformat()
+    assert daily[-1]["date"] == today.isoformat()
+    for field in (
+        "allowed_requests",
+        "redacted_requests",
+        "blocked_requests",
+        "error_requests",
+    ):
+        assert sum(day[field] for day in daily) == payload[field]
 
 
 def test_stats_avg_latency_calculation(client: TestClient) -> None:
@@ -137,6 +259,22 @@ def test_stats_avg_latency_calculation(client: TestClient) -> None:
     resp = client.get("/api/v1/dashboard/stats", headers=_auth_headers(auth["access_token"]))
     avg = resp.json()["avg_latency_ms"]
     assert abs(avg - 20.0) < 1.0  # allow floating-point fuzz
+
+
+def test_stats_average_latency_ignores_missing_conversation_latency(client: TestClient) -> None:
+    auth = _signup(client)
+    tid = _get_tenant_id(client, auth["access_token"])
+
+    _seed_log(tid, "ALLOWED", 100)
+    _seed_log(tid, "ALLOWED", None)
+
+    resp = client.get(
+        "/api/v1/dashboard/stats",
+        headers=_auth_headers(auth["access_token"]),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total_requests"] == 2
+    assert resp.json()["avg_latency_ms"] == 100.0
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +330,50 @@ def test_safety_config_partial_update_leaves_other_fields_unchanged(client: Test
     after = client.get("/api/v1/dashboard/safety-config", headers=headers).json()
     assert after["global_block_enabled"] is True
     assert after["log_retention_days"] == original_retention  # unchanged
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/v1/dashboard/safety-config", "/api/v1/policies/config"],
+)
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"injection_protection": None},
+        {"fallback_message": "x" * 2001},
+        {"unexpected": True},
+    ],
+)
+def test_both_config_routes_reject_null_oversized_and_unknown_fields(
+    client: TestClient,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    auth = _signup(client)
+
+    response = client.put(
+        path,
+        headers=_auth_headers(auth["access_token"]),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+def test_safety_config_enforcement_change_bumps_active_policy_version(client: TestClient) -> None:
+    auth = _signup(client)
+    headers = _auth_headers(auth["access_token"])
+    before = client.get("/api/v1/auth/me", headers=headers).json()["active_policy_version"]
+
+    response = client.put(
+        "/api/v1/dashboard/safety-config",
+        headers=headers,
+        json={"global_block_enabled": True},
+    )
+
+    assert response.status_code == 200
+    after = client.get("/api/v1/auth/me", headers=headers).json()["active_policy_version"]
+    assert after == before + 1
 
 
 def test_safety_config_fail_mode_persists_correctly(client: TestClient) -> None:

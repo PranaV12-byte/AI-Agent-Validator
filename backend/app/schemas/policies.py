@@ -184,12 +184,27 @@ class PolicyListResponse(BaseModel):
 class PolicyConfigUpdate(BaseModel):
     """Request body for policy behavior configuration updates."""
 
+    model_config = ConfigDict(extra="forbid")
+
     injection_protection: bool | None = None
     injection_sensitivity: Literal["strict", "moderate", "lenient"] | None = None
     pii_redaction: bool | None = None
     policy_enforcement: bool | None = None
     fail_mode: Literal["open", "closed"] | None = None
-    fallback_message: str | None = None
+    fallback_message: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def reject_explicit_nulls(self) -> "PolicyConfigUpdate":
+        null_fields = [
+            name
+            for name in self.model_fields_set
+            if getattr(self, name) is None
+        ]
+        if null_fields:
+            raise ValueError(
+                "Fields cannot be null: " + ", ".join(sorted(null_fields))
+            )
+        return self
 
 
 class PolicyConfigResponse(BaseModel):

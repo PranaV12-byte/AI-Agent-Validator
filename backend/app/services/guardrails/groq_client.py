@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
@@ -151,19 +152,22 @@ class GroqClient:
         if response_format is not None:
             payload["response_format"] = response_format
 
+        total_timeout = min(float(self._settings.groq_timeout_seconds), 20.0)
         try:
-            async with self._client_factory(
-                timeout=self._settings.groq_timeout_seconds,
-            ) as client:
-                response = await client.post(
-                    GROQ_CHAT_COMPLETIONS_URL,
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-        except httpx.TimeoutException as exc:
+            # HTTPX's timeout is an inactivity timeout for individual phases.
+            # The outer deadline also bounds slow streaming/trickling responses,
+            # connection setup, and context-manager teardown as one whole call.
+            async with asyncio.timeout(total_timeout):
+                async with self._client_factory(timeout=total_timeout) as client:
+                    response = await client.post(
+                        GROQ_CHAT_COMPLETIONS_URL,
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+        except (httpx.TimeoutException, TimeoutError) as exc:
             raise GroqProviderError("groq_timeout") from exc
         except httpx.RequestError as exc:
             raise GroqProviderError("groq_network_error") from exc

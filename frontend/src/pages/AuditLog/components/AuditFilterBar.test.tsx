@@ -23,7 +23,7 @@ describe("AuditFilterBar", () => {
     expect(screen.getByTestId("action-filter")).toBeInTheDocument()
   })
 
-  it("renders All, Allowed, Blocked, Redacted options", () => {
+  it("renders All, Allowed, Blocked, Redacted, and Error options", () => {
     render(<AuditFilterBar {...defaultProps} />)
     const select = screen.getByTestId("action-filter") as HTMLSelectElement
     const values = Array.from(select.options).map((o) => o.value)
@@ -31,6 +31,7 @@ describe("AuditFilterBar", () => {
     expect(values).toContain("ALLOWED")
     expect(values).toContain("BLOCKED")
     expect(values).toContain("REDACTED")
+    expect(values).toContain("ERROR")
   })
 
   it("renders start date and end date inputs", () => {
@@ -46,6 +47,15 @@ describe("AuditFilterBar", () => {
 
     await user.selectOptions(screen.getByTestId("action-filter"), "BLOCKED")
     expect(onActionChange).toHaveBeenCalledWith("BLOCKED")
+  })
+
+  it("allows filtering by error actions", async () => {
+    const user = userEvent.setup()
+    const onActionChange = vi.fn()
+    render(<AuditFilterBar {...defaultProps} onActionChange={onActionChange} />)
+
+    await user.selectOptions(screen.getByTestId("action-filter"), "ERROR")
+    expect(onActionChange).toHaveBeenCalledWith("ERROR")
   })
 
   it("calls onStartDateChange when start date input changes", async () => {

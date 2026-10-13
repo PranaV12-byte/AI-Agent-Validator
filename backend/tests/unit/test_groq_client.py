@@ -1,5 +1,6 @@
 """Mock-only contracts for the opt-in Groq adapter; never makes network calls."""
 
+import asyncio
 import importlib
 import json
 from types import SimpleNamespace
@@ -270,3 +271,29 @@ async def test_timeout_is_explicit_failure() -> None:
         await client.complete("synthetic prompt")
 
     assert error.value.code == "groq_timeout"
+
+
+@pytest.mark.asyncio
+async def test_total_deadline_bounds_a_transport_that_never_completes() -> None:
+    requests: list[httpx.Request] = []
+
+    class WaitingTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    client = GroqClient(
+        _settings(groq_timeout_seconds=0.02),
+        client_factory=lambda *, timeout: httpx.AsyncClient(
+            transport=WaitingTransport(),
+            timeout=timeout,
+        ),
+    )
+
+    with pytest.raises(GroqProviderError) as error:
+        async with asyncio.timeout(0.5):
+            await client.complete("synthetic prompt")
+
+    assert error.value.code == "groq_timeout"
+    assert len(requests) == 1

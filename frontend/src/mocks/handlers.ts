@@ -1,10 +1,34 @@
 import { http, HttpResponse } from "msw"
 import { MOCK_JWT } from "../test/utils/mockJwt"
 
+const mockDailyTrend = (() => {
+  const today = new Date()
+  today.setUTCHours(0, 0, 0, 0)
+  const allowed = [12, 14, 17, 13, 16, 15, 15]
+  const redacted = [0, 0, 1, 0, 1, 0, 1]
+  const blocked = [1, 2, 1, 2, 2, 2, 2]
+  const errors = [0, 1, 0, 1, 0, 1, 0]
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(today)
+    day.setUTCDate(today.getUTCDate() - 6 + index)
+    return {
+      date: day.toISOString().slice(0, 10),
+      allowed_requests: allowed[index],
+      redacted_requests: redacted[index],
+      blocked_requests: blocked[index],
+      error_requests: errors[index],
+    }
+  })
+})()
+
 const dashboardStatsResponse = {
   total_requests: 120,
   blocked_requests: 12,
+  allowed_requests: 102,
+  redacted_requests: 3,
+  error_requests: 3,
   avg_latency_ms: 42.5,
+  daily_trend: mockDailyTrend,
 }
 
 const auditResponse = {
@@ -185,6 +209,15 @@ const dashboardStatsHandler = http.get("*/api/v1/dashboard/stats", () => {
   return HttpResponse.json(dashboardStatsResponse)
 })
 
+const protectedChatReadinessHandler = http.get(
+  "*/api/v1/demo/protected-chat/readiness",
+  () => HttpResponse.json({
+    ready: false,
+    error_code: "groq_api_key_missing",
+    model: "openai/gpt-oss-20b",
+  }),
+)
+
 const auditHandler = http.get("*/api/v1/audit/", ({ request }) => {
   const url = new URL(request.url)
   const limit = Number(url.searchParams.get("limit") ?? 50)
@@ -238,6 +271,7 @@ export const handlers = [
   resendVerificationHandler,
   profileHandler,
   dashboardStatsHandler,
+  protectedChatReadinessHandler,
   auditHandler,
   policiesHandler,
   policyConfigGetHandler,
@@ -255,6 +289,7 @@ export const mockHandlers = {
   resendVerification: resendVerificationHandler,
   profile: profileHandler,
   dashboardStats: dashboardStatsHandler,
+  protectedChatReadiness: protectedChatReadinessHandler,
   audit: auditHandler,
   policies: policiesHandler,
   policyConfigGet: policyConfigGetHandler,

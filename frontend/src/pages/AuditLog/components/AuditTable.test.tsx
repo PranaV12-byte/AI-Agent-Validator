@@ -90,3 +90,15 @@ describe("AuditTable Algorand status", () => {
     expect(onSelectLog).toHaveBeenCalledWith(baseLog)
   })
 })
+
+describe("AuditTable error action", () => {
+  it("shows ERROR as a red action badge", () => {
+    renderTable({
+      ...baseLog,
+      action: "ERROR",
+      violation_type: "evaluation_error",
+    })
+
+    expect(screen.getByText("ERROR")).toHaveClass("bg-brand-red/10", "text-brand-red")
+  })
+})

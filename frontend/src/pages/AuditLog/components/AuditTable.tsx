@@ -12,13 +12,17 @@ type AuditTableProps = {
 }
 
 function actionBadgeClass(action: AuditLog["action"]): string {
-  if (action === "BLOCKED") {
+  if (action === "BLOCKED" || action === "ERROR") {
     return "bg-brand-red/10 text-brand-red"
   }
   if (action === "ALLOWED") {
     return "bg-brand-green/10 text-brand-green"
   }
   return "bg-text-muted/10 text-text-muted"
+}
+
+function actionLabel(action: AuditLog["action"]): string {
+  return action === "ERROR" ? "ERROR" : action.toLowerCase()
 }
 
 function formatTimestamp(value: string): string {
@@ -124,7 +128,7 @@ function AuditTable({
                       <span
                         className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase ${actionBadgeClass(log.action)}`}
                       >
-                        {log.action.toLowerCase()}
+                        {actionLabel(log.action)}
                       </span>
                     </td>
                     <td className="px-6 py-5 font-medium">{log.violation_type ?? "n/a"}</td>

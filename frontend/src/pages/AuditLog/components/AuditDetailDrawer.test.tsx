@@ -74,6 +74,15 @@ describe("AuditDetailDrawer", () => {
     expect(screen.getByText("Request allowed by guardrails")).toBeInTheDocument()
   })
 
+  it("labels ERROR honestly and does not describe the request as allowed", () => {
+    const log = { ...baseLog, action: "ERROR" as const, violation_type: null }
+    render(<AuditDetailDrawer log={log} onClose={vi.fn()} />)
+
+    expect(screen.getByText("ERROR")).toHaveClass("text-brand-red", "font-bold")
+    expect(screen.getByText("Request could not be completed")).toBeInTheDocument()
+    expect(screen.queryByText("Request allowed by guardrails")).not.toBeInTheDocument()
+  })
+
   it("displays input_preview inside the input payload section", () => {
     render(<AuditDetailDrawer log={baseLog} onClose={vi.fn()} />)
     // input_preview is serialized in a JSON pre block

@@ -1,10 +1,10 @@
 import { apiClient } from "./apiClient"
-import type { AuditListResponse } from "../types/api"
+import type { AuditListResponse, AuditLog } from "../types/api"
 
 type FetchAuditLogsParams = {
   page?: number
   page_size?: number
-  action?: "BLOCKED" | "ALLOWED" | "REDACTED"
+  action?: AuditLog["action"]
   start_date?: string
   end_date?: string
   search?: string
@@ -31,7 +31,7 @@ export async function fetchAuditLogs(
 }
 
 type ExportAuditLogsParams = {
-  action?: "BLOCKED" | "ALLOWED" | "REDACTED"
+  action?: AuditLog["action"]
   start_date?: string
   end_date?: string
   search?: string

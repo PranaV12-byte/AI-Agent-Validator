@@ -25,10 +25,22 @@ export type ForgotPasswordResponse = {
   reset_url?: string | null
 }
 
+export type DashboardDailyActivity = {
+  date: string
+  allowed_requests: number
+  redacted_requests: number
+  blocked_requests: number
+  error_requests: number
+}
+
 export type DashboardStats = {
   total_requests: number
   blocked_requests: number
+  allowed_requests: number
+  redacted_requests: number
+  error_requests: number
   avg_latency_ms: number
+  daily_trend: DashboardDailyActivity[]
 }
 
 export type UsageTrend = {
@@ -43,7 +55,11 @@ export type UsageTrend = {
 export type DashboardResponse = {
   total_requests: number
   blocked_requests: number
+  allowed_requests: number
+  redacted_requests: number
+  error_requests: number
   avg_latency_ms: number
+  daily_trend: DashboardDailyActivity[]
 }
 
 export type AuditLog = {
@@ -51,7 +67,7 @@ export type AuditLog = {
   tenant_id: string
   session_id: string | null
   hook_type: string
-  action: "BLOCKED" | "ALLOWED" | "REDACTED"
+  action: "BLOCKED" | "ALLOWED" | "REDACTED" | "ERROR"
   violation_type: string | null
   severity: string
   input_preview: string | null

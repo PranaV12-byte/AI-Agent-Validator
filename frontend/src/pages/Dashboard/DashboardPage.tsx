@@ -86,7 +86,11 @@ function DashboardPage() {
         setStats({
           total_requests: dashboardResult.value.total_requests,
           blocked_requests: dashboardResult.value.blocked_requests,
+          allowed_requests: dashboardResult.value.allowed_requests,
+          redacted_requests: dashboardResult.value.redacted_requests,
+          error_requests: dashboardResult.value.error_requests,
           avg_latency_ms: dashboardResult.value.avg_latency_ms,
+          daily_trend: dashboardResult.value.daily_trend,
         })
       } else {
         setStatsError("Unable to fetch security metrics at this time.")
@@ -156,7 +160,11 @@ function DashboardPage() {
     <>
       <PageHeader />
       <KpiGrid stats={stats} isLoading={isStatsLoading} error={statsError} />
-      <UsageTrendChart />
+      <UsageTrendChart
+        points={stats?.daily_trend ?? []}
+        isLoading={isStatsLoading}
+        error={statsError}
+      />
       {showChecklist ? <OnboardingChecklist steps={checklistSteps} /> : null}
       <ActivityTable logs={logs} isLoading={isLogsLoading} error={logsError} />
     </>

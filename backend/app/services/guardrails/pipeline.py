@@ -422,12 +422,19 @@ async def evaluate_guardrails(
                                 finding["similarity"] = float(similarity)
                             violations.append(finding)
                     if getattr(policy_result, "block_on_error", False):
-                        violations.append(
-                            {
-                                "type": "policy_evaluation_uncertain",
-                                "severity": "high",
-                            }
-                        )
+                        # An incomplete evaluator is not an affirmative rule
+                        # violation. Keep it distinct so callers and dashboards
+                        # can report an error, while refusing to forward text
+                        # even when the tenant's ordinary mode is fail-open.
+                        if not failure_codes:
+                            code = "policy_evaluation_uncertain"
+                            _log_evaluator_failure(
+                                tenant_id,
+                                code,
+                                RuntimeError("policy_evaluation_incomplete"),
+                            )
+                            failure_codes.append(code)
+                        safe_text = None
                 except Exception as exc:
                     _log_evaluator_failure(
                         tenant_id, "policy_evaluation_failed", exc
@@ -439,7 +446,6 @@ async def evaluate_guardrails(
         in (
             "prompt_injection",
             "policy_violation",
-            "policy_evaluation_uncertain",
         )
         for finding in violations
     ):
@@ -452,7 +458,7 @@ async def evaluate_guardrails(
                     finding["type"] == "policy_violation"
                     for finding in violations
                 )
-                else "A configured policy could not be evaluated safely."
+                else "A configured policy was violated."
             )
         )
         return _result(
