@@ -1,6 +1,7 @@
 import { X } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 
+import { useNativeModalDialog } from "../../../hooks/useNativeModalDialog"
 import type { Policy, PolicyCreatePayload, PolicyRuleType } from "../../../types/api"
 
 type PolicyBuilderModalProps = {
@@ -8,6 +9,7 @@ type PolicyBuilderModalProps = {
   policy: Policy | null
   isOpen: boolean
   isSaving: boolean
+  fallbackFocusRef?: RefObject<HTMLElement | null>
   onClose: () => void
   onSave: (payload: PolicyCreatePayload) => Promise<void>
 }
@@ -54,12 +56,50 @@ const PII_TYPE_OPTIONS = [
 ]
 const DEFAULT_PII_TYPES = PII_TYPE_OPTIONS.map((option) => option.value)
 const INJECTION_SENSITIVITIES = ["strict", "moderate", "lenient"] as const
+const REGEX_VALIDATION_MESSAGES = new Set([
+  "regex_match pattern is invalid",
+  "regex_match requires parameters.pattern as non-empty string",
+  "regex_match pattern must be at most 256 characters",
+])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function isRegexValidationMessage(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  const normalized = value.trim().toLowerCase().replace(/^value error,\s*/, "")
+  return REGEX_VALIDATION_MESSAGES.has(normalized)
+}
+
+function isInvalidRegexResponse(error: unknown): boolean {
+  if (!isRecord(error) || !isRecord(error.response) || error.response.status !== 422) {
+    return false
+  }
+
+  const data = error.response.data
+  if (!isRecord(data)) return false
+
+  if (typeof data.detail === "string") {
+    return isRegexValidationMessage(data.detail)
+  }
+  if (!Array.isArray(data.detail)) return false
+
+  return data.detail.some((issue: unknown) => {
+    if (!isRecord(issue) || !Array.isArray(issue.loc)) return false
+    const requestLocation = issue.loc.some(
+      (segment: unknown) => segment === "body" || segment === "parameters" || segment === "pattern",
+    )
+    return requestLocation && isRegexValidationMessage(issue.msg)
+  })
+}
 
 function PolicyBuilderModal({
   mode,
   policy,
   isOpen,
   isSaving,
+  fallbackFocusRef,
   onClose,
   onSave,
 }: PolicyBuilderModalProps) {
@@ -87,8 +127,32 @@ function PolicyBuilderModal({
       ? String(configured)
       : ""
   })
+  const [patternError, setPatternError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const formRevisionRef = useRef(0)
+
+  function invalidatePendingSave() {
+    formRevisionRef.current += 1
+  }
+
+  function handleClose() {
+    invalidatePendingSave()
+    onClose()
+  }
+
+  function handleFormEdit() {
+    invalidatePendingSave()
+    setSaveError(null)
+  }
+
+  const { dialogRef, handleCancel, handleKeyDown, handleBackdropClick } = useNativeModalDialog({
+    isOpen,
+    onClose: handleClose,
+    fallbackFocusRef,
+  })
 
   useEffect(() => {
+    formRevisionRef.current += 1
     setName(policy?.name ?? "")
     setDescription(policy?.description ?? "")
     setRuleType(policy?.rule_type ?? "semantic")
@@ -112,16 +176,9 @@ function PolicyBuilderModal({
         ? String(configuredThreshold)
         : "",
     )
+    setPatternError(null)
+    setSaveError(null)
   }, [policy, isOpen])
-
-  useEffect(() => {
-    if (!isOpen) return
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose()
-    }
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [isOpen, onClose])
 
   const isSaveDisabled = useMemo(() => {
     if (!name.trim() || !ruleText.trim()) {
@@ -167,6 +224,7 @@ function PolicyBuilderModal({
   ])
 
   async function handleSubmit() {
+    const submittedRevision = formRevisionRef.current
     const parameters: Record<string, unknown> = {}
     if (ruleType === "regex_match") {
       parameters.pattern = regexPattern
@@ -187,13 +245,25 @@ function PolicyBuilderModal({
       parameters.threshold = Number(semanticThreshold)
     }
 
-    await onSave({
-      name: name.trim(),
-      description: description.trim() || null,
-      rule_text: ruleText.trim(),
-      rule_type: ruleType,
-      parameters,
-    })
+    setPatternError(null)
+    setSaveError(null)
+    try {
+      await onSave({
+        name: name.trim(),
+        description: description.trim() || null,
+        rule_text: ruleText.trim(),
+        rule_type: ruleType,
+        parameters,
+      })
+    } catch (error: unknown) {
+      if (formRevisionRef.current !== submittedRevision) return
+
+      if (ruleType === "regex_match" && isInvalidRegexResponse(error)) {
+        setPatternError("Enter a valid Python regular-expression pattern.")
+      } else {
+        setSaveError("Could not save policy. Please review the form and try again.")
+      }
+    }
   }
 
   if (!isOpen) {
@@ -201,17 +271,22 @@ function PolicyBuilderModal({
   }
 
   return (
-    <>
-      <div
-        data-testid="modal-backdrop"
-        className="fixed inset-0 bg-black/40 z-40"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <aside className="fixed top-0 right-0 h-full w-full max-w-xl bg-sidebar-bg border-l border-border-color shadow-2xl z-50 p-6 overflow-y-auto">
+    <dialog
+      ref={dialogRef}
+      data-testid="policy-builder-dialog"
+      aria-labelledby="policy-builder-title"
+      aria-modal="true"
+      onCancel={handleCancel}
+      onKeyDown={handleKeyDown}
+      onClick={handleBackdropClick}
+      onInput={handleFormEdit}
+      onChange={handleFormEdit}
+      className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none border-0 bg-transparent p-0 text-white backdrop:bg-black/40"
+    >
+      <div className="fixed top-0 right-0 h-full w-full max-w-xl overflow-y-auto border-l border-border-color bg-sidebar-bg p-6 shadow-2xl">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold">{mode === "create" ? "New Protection Rule" : "Edit Protection Rule"}</h2>
-        <button type="button" onClick={onClose} className="text-text-muted hover:text-white" aria-label="Close panel">
+        <h2 id="policy-builder-title" className="text-xl font-bold">{mode === "create" ? "New Protection Rule" : "Edit Protection Rule"}</h2>
+        <button type="button" onClick={handleClose} className="text-text-muted hover:text-white" aria-label="Close panel">
           <X className="w-5 h-5" />
         </button>
       </div>
@@ -223,6 +298,7 @@ function PolicyBuilderModal({
           </label>
           <input
             id="policy-name"
+            data-dialog-initial-focus
             value={name}
             onChange={(event) => setName(event.target.value)}
             className="w-full bg-dashboard-bg border border-border-color rounded-lg px-3 py-2.5 text-sm"
@@ -250,7 +326,10 @@ function PolicyBuilderModal({
             id="policy-rule-type"
             data-testid="policy-rule-type"
             value={ruleType}
-            onChange={(event) => setRuleType(event.target.value as PolicyRuleType)}
+            onChange={(event) => {
+              setRuleType(event.target.value as PolicyRuleType)
+              setPatternError(null)
+            }}
             className="w-full bg-dashboard-bg border border-border-color rounded-lg px-3 py-2.5 text-sm"
           >
             {RULE_TYPE_OPTIONS.map((option) => (
@@ -287,10 +366,20 @@ function PolicyBuilderModal({
             <input
               id="policy-regex-pattern"
               data-testid="policy-regex-pattern"
+              aria-invalid={patternError ? true : undefined}
+              aria-describedby={patternError ? "policy-regex-pattern-error" : undefined}
               value={regexPattern}
-              onChange={(event) => setRegexPattern(event.target.value)}
+              onChange={(event) => {
+                setRegexPattern(event.target.value)
+                setPatternError(null)
+              }}
               className="w-full bg-dashboard-bg border border-border-color rounded-lg px-3 py-2.5 text-sm"
             />
+            {patternError ? (
+              <p id="policy-regex-pattern-error" role="alert" className="mt-1 text-sm text-brand-red">
+                {patternError}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -402,10 +491,16 @@ function PolicyBuilderModal({
           </div>
         ) : null}
 
+        {saveError ? (
+          <p role="alert" className="text-sm text-brand-red bg-brand-red/10 border border-brand-red/30 rounded-lg px-3 py-2">
+            {saveError}
+          </p>
+        ) : null}
+
         <div className="flex justify-end gap-2 pt-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="px-4 py-2 rounded-lg border border-border-color text-text-muted hover:text-white"
           >
             Cancel
@@ -421,8 +516,8 @@ function PolicyBuilderModal({
           </button>
         </div>
       </div>
-    </aside>
-    </>
+      </div>
+    </dialog>
   )
 }
 

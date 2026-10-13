@@ -1,6 +1,6 @@
 import { X } from "lucide-react"
-import { useEffect } from "react"
 
+import { useNativeModalDialog } from "../../../hooks/useNativeModalDialog"
 import type { AuditLog } from "../../../types/api"
 
 type AuditDetailDrawerProps = {
@@ -66,36 +66,36 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
-  useEffect(() => {
-    if (!log) return
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose()
-    }
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [log, onClose])
+  const { dialogRef, handleCancel, handleKeyDown, handleBackdropClick } = useNativeModalDialog({
+    isOpen: Boolean(log),
+    onClose,
+  })
 
   if (!log) return null
 
   return (
-    <>
-      <div
-        data-testid="drawer-backdrop"
-        className="fixed inset-0 bg-black/40 z-30"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+    <dialog
+      ref={dialogRef}
+      id={`audit-drawer-${log.id}`}
+      data-testid={`audit-drawer-${log.id}`}
+      aria-labelledby="audit-detail-title"
+      aria-modal="true"
+      onCancel={handleCancel}
+      onKeyDown={handleKeyDown}
+      onClick={handleBackdropClick}
+      className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none border-0 bg-transparent p-0 text-white backdrop:bg-black/40"
+    >
       <aside
-        data-testid={`audit-drawer-${log.id}`}
         className="fixed top-0 right-0 h-full w-full max-w-xl bg-sidebar-bg border-l border-border-color shadow-2xl z-40 p-6 overflow-y-auto"
       >
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h3 className="text-xl font-bold">Audit Detail</h3>
+          <h3 id="audit-detail-title" className="text-xl font-bold">Audit Detail</h3>
           <p className="text-xs text-text-muted mt-1 break-all">{log.id}</p>
         </div>
         <button
           type="button"
+          data-dialog-initial-focus
           onClick={onClose}
           className="text-text-muted hover:text-white transition-colors"
           aria-label="Close drawer"
@@ -166,7 +166,7 @@ function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
         </div>
       </div>
     </aside>
-    </>
+    </dialog>
   )
 }
 

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { AuditLog } from "../../../types/api"
@@ -88,6 +89,32 @@ describe("AuditTable Algorand status", () => {
 
     fireEvent.click(screen.getByTestId("audit-row-log-1"))
     expect(onSelectLog).toHaveBeenCalledWith(baseLog)
+  })
+
+  it("opens the selected row from the timestamp with Enter and Space", async () => {
+    const user = userEvent.setup()
+    const onSelectLog = vi.fn()
+    render(
+      <AuditTable
+        logs={[baseLog]}
+        isLoading={false}
+        error={null}
+        onSelectLog={onSelectLog}
+        onResetFilters={vi.fn()}
+      />,
+    )
+
+    const timestampButton = screen.getByRole("button", { name: /^View details for / })
+    expect(timestampButton).toHaveAttribute("aria-haspopup", "dialog")
+    expect(timestampButton).toHaveAttribute("aria-controls", "audit-drawer-log-1")
+
+    timestampButton.focus()
+    await user.keyboard("{Enter}")
+    expect(onSelectLog).toHaveBeenCalledExactlyOnceWith(baseLog)
+
+    onSelectLog.mockClear()
+    await user.keyboard(" ")
+    expect(onSelectLog).toHaveBeenCalledExactlyOnceWith(baseLog)
   })
 })
 

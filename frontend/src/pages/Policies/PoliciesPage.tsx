@@ -23,6 +23,8 @@ function PoliciesPage() {
   const [isSaving, setIsSaving] = useState(false)
 
   const savingRef = useRef(false)
+  const deletingRef = useRef(false)
+  const addRuleButtonRef = useRef<HTMLButtonElement>(null)
   const [policyToDelete, setPolicyToDelete] = useState<Policy | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -62,8 +64,9 @@ function PoliciesPage() {
       setIsBuilderOpen(false)
       setSelectedPolicy(null)
       await loadPolicies()
-    } catch {
+    } catch (error: unknown) {
       toast.error("Could not save policy")
+      throw error
     } finally {
       savingRef.current = false
       setIsSaving(false)
@@ -71,19 +74,21 @@ function PoliciesPage() {
   }
 
   async function handleDeleteConfirm() {
-    if (!policyToDelete) {
+    if (!policyToDelete || deletingRef.current) {
       return
     }
 
+    deletingRef.current = true
     setIsDeleting(true)
     try {
       await deletePolicy(policyToDelete.id)
-      setPolicyToDelete(null)
       await loadPolicies()
+      setPolicyToDelete(null)
       toast.success("Policy deleted")
     } catch {
       toast.error("Could not delete policy")
     } finally {
+      deletingRef.current = false
       setIsDeleting(false)
     }
   }
@@ -106,6 +111,7 @@ function PoliciesPage() {
         policies={policies}
         isLoading={isLoading}
         error={error}
+        addRuleButtonRef={addRuleButtonRef}
         onCreate={() => {
           setBuilderMode("create")
           setSelectedPolicy(null)
@@ -125,6 +131,7 @@ function PoliciesPage() {
         policy={selectedPolicy}
         isOpen={isBuilderOpen}
         isSaving={isSaving}
+        fallbackFocusRef={addRuleButtonRef}
         onClose={() => setIsBuilderOpen(false)}
         onSave={handleSave}
       />
@@ -134,6 +141,7 @@ function PoliciesPage() {
         isDeleting={isDeleting}
         onCancel={() => setPolicyToDelete(null)}
         onConfirm={handleDeleteConfirm}
+        fallbackFocusRef={addRuleButtonRef}
       />
     </>
   )

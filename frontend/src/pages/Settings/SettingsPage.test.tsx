@@ -94,7 +94,7 @@ describe("SettingsPage", () => {
     const saveButton = await screen.findByTestId("settings-save-button")
     expect(saveButton).toBeDisabled()
 
-    fireEvent.click(screen.getByLabelText("Block all harmful messages"))
+    fireEvent.click(screen.getByLabelText("Pause all AI requests"))
 
     expect(saveButton).toBeEnabled()
     expect(saveButton).toHaveTextContent("Save Unsaved Changes")
@@ -125,7 +125,7 @@ describe("SettingsPage", () => {
     expect(saveButton).toBeDisabled()
 
     // Make a change to enable the save button
-    fireEvent.click(screen.getByLabelText("Block all harmful messages"))
+    fireEvent.click(screen.getByLabelText("Pause all AI requests"))
     expect(saveButton).toBeEnabled()
 
     fireEvent.click(saveButton)
@@ -199,7 +199,7 @@ describe("SettingsPage", () => {
     const saveButton = await screen.findByTestId("settings-save-button")
 
     // Make a change to enable the save button
-    fireEvent.click(screen.getByLabelText("Block all harmful messages"))
+    fireEvent.click(screen.getByLabelText("Pause all AI requests"))
     fireEvent.click(saveButton)
 
     expect(

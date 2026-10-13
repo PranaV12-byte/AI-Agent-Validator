@@ -24,16 +24,13 @@ describe("SecurityPostureCard", () => {
 
   it("renders global block enabled checkbox unchecked by default", () => {
     render(<SecurityPostureCard form={{ ...defaultForm, global_block_enabled: false }} onChange={vi.fn()} />)
-    const checkboxes = screen.getAllByRole("checkbox")
-    const blockCheckbox = checkboxes.find((cb) => !cb.closest("label")?.textContent?.includes("personal"))
-    expect(blockCheckbox).not.toBeChecked()
+    expect(screen.getByLabelText("Pause all AI requests")).not.toBeChecked()
+    expect(screen.getByText("Stops every request, including harmless messages. Turn off to resume.")).toBeInTheDocument()
   })
 
   it("renders global_block_enabled checkbox as checked when true", () => {
     render(<SecurityPostureCard form={{ ...defaultForm, global_block_enabled: true }} onChange={vi.fn()} />)
-    // First checkbox is global_block_enabled
-    const checkboxes = screen.getAllByRole("checkbox")
-    expect(checkboxes[0]).toBeChecked()
+    expect(screen.getByLabelText("Pause all AI requests")).toBeChecked()
   })
 
   it("renders pii_redaction checkbox as checked when true", () => {

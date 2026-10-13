@@ -68,11 +68,19 @@ describe("PublicRoute", () => {
     expect(screen.queryByTestId("dashboard-page")).not.toBeInTheDocument()
   })
 
-  it("shows loading state while isLoading=true even if hydrated", () => {
-    mockAuth({ isAuthenticated: false, isHydrated: true, isLoading: true })
+  it("keeps the public form mounted while a token-free login request is loading", () => {
+    mockAuth({ isAuthenticated: false, isHydrated: true, isLoading: true, accessToken: null })
+    renderPublicRoute()
+
+    expect(screen.getByTestId("public-content")).toBeInTheDocument()
+  })
+
+  it("gates public content while an existing token is being restored", () => {
+    mockAuth({ isAuthenticated: false, isHydrated: true, isLoading: true, accessToken: "pending-token" })
     renderPublicRoute()
 
     expect(screen.getByText(/restoring session/i)).toBeInTheDocument()
+    expect(screen.queryByTestId("public-content")).not.toBeInTheDocument()
   })
 
   it("does not redirect authenticated user until hydration is complete", () => {

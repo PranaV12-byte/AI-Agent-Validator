@@ -121,9 +121,27 @@ function AuditTable({
                     key={log.id}
                     data-testid={`audit-row-${log.id}`}
                     className="hover:bg-white/5 transition-colors cursor-pointer"
-                    onClick={() => onSelectLog(log)}
+                    onClick={(event) => {
+                      event.currentTarget.querySelector<HTMLButtonElement>("[data-audit-open]")?.focus()
+                      onSelectLog(log)
+                    }}
                   >
-                    <td className="px-6 py-5 text-sm text-text-muted">{formatTimestamp(log.created_at)}</td>
+                    <td className="px-6 py-5 text-sm text-text-muted">
+                      <button
+                        type="button"
+                        data-audit-open
+                        aria-haspopup="dialog"
+                        aria-controls={`audit-drawer-${log.id}`}
+                        aria-label={`View details for ${formatTimestamp(log.created_at)}`}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onSelectLog(log)
+                        }}
+                        className="text-left hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-green"
+                      >
+                        {formatTimestamp(log.created_at)}
+                      </button>
+                    </td>
                     <td className="px-6 py-5">
                       <span
                         className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase ${actionBadgeClass(log.action)}`}

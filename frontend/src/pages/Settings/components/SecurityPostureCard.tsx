@@ -19,9 +19,14 @@ function SecurityPostureCard({ form, onChange, isLoading = false }: SecurityPost
       <h2 className="text-lg font-semibold">Protection Settings</h2>
 
       <label className="flex items-center justify-between">
-        <span className="text-sm text-text-muted">Block all harmful messages</span>
+        <div>
+          <span className="text-sm text-text-muted">Pause all AI requests</span>
+          <p className="text-xs text-text-muted/70 mt-0.5">
+            Stops every request, including harmless messages. Turn off to resume.
+          </p>
+        </div>
         <input
-          aria-label="Block all harmful messages"
+          aria-label="Pause all AI requests"
           type="checkbox"
           checked={form.global_block_enabled}
           disabled={isLoading}

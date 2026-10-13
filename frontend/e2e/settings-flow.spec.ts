@@ -87,8 +87,8 @@ test("safety config save persists after page reload", async ({ page, request }) 
     page.getByLabel("Hide personal info in messages"),
   ).toBeEnabled({ timeout: 20000 })
 
-  // Toggle "Block all harmful messages" to enabled
-  const blockAllCheckbox = page.getByLabel("Block all harmful messages")
+  // Toggle "Pause all AI requests" to enabled
+  const blockAllCheckbox = page.getByLabel("Pause all AI requests")
   const wasChecked = await blockAllCheckbox.isChecked()
   await blockAllCheckbox.click()
   expect(await blockAllCheckbox.isChecked()).toBe(!wasChecked)
@@ -106,10 +106,10 @@ test("safety config save persists after page reload", async ({ page, request }) 
   // Reload and verify setting persisted
   await page.goto("/settings")
   await expect(
-    page.getByLabel("Block all harmful messages"),
+    page.getByLabel("Pause all AI requests"),
   ).toBeEnabled({ timeout: 20000 })
 
-  const afterReload = await page.getByLabel("Block all harmful messages").isChecked()
+  const afterReload = await page.getByLabel("Pause all AI requests").isChecked()
   expect(afterReload).toBe(!wasChecked)
 })
 

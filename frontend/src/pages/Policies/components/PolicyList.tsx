@@ -1,3 +1,4 @@
+import type { Ref } from "react"
 import type { Policy } from "../../../types/api"
 import { ShieldAlert } from "lucide-react"
 
@@ -5,6 +6,7 @@ type PolicyListProps = {
   policies: Policy[]
   isLoading: boolean
   error: string | null
+  addRuleButtonRef?: Ref<HTMLButtonElement>
   onCreate: () => void
   onEdit: (policy: Policy) => void
   onDelete: (policy: Policy) => void
@@ -28,6 +30,7 @@ function PolicyList({
   policies,
   isLoading,
   error,
+  addRuleButtonRef,
   onCreate,
   onEdit,
   onDelete,
@@ -49,6 +52,7 @@ function PolicyList({
           <p className="text-text-muted">Set up rules to keep your AI safe for your customers.</p>
         </div>
         <button
+          ref={addRuleButtonRef}
           type="button"
           onClick={onCreate}
           className="px-4 py-2 rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green hover:bg-brand-green/20"

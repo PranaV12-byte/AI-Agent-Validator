@@ -65,18 +65,47 @@ describe("AccountPage", () => {
   it("shows pre-filled company name", () => {
     renderAccountPage()
     expect(screen.getByDisplayValue("Old Corp")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Save$/i })).toBeDisabled()
+  })
+
+  it("shows required feedback and prevents saving a blank company name", () => {
+    renderAccountPage()
+    const companyName = screen.getByLabelText("Company name")
+    const saveButton = screen.getByRole("button", { name: /^Save$/i })
+
+    fireEvent.change(companyName, { target: { value: "   " } })
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Company name is required.")
+    expect(companyName).toHaveAttribute("aria-invalid", "true")
+    expect(saveButton).toBeDisabled()
+    fireEvent.click(saveButton)
+    expect(updateProfileRequest).not.toHaveBeenCalled()
   })
 
   it("saves company name on submit", async () => {
     renderAccountPage()
     fireEvent.change(screen.getByDisplayValue("Old Corp"), {
-      target: { value: "New Corp" },
+      target: { value: "  New Corp  " },
     })
     fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
     await waitFor(() =>
       expect(updateProfileRequest).toHaveBeenCalledWith({ company_name: "New Corp" }),
     )
     expect(await screen.findByText("Company name updated")).toBeInTheDocument()
+  })
+
+  it("keeps company-name server errors visible", async () => {
+    vi.mocked(updateProfileRequest).mockRejectedValueOnce(new Error("server failure"))
+    renderAccountPage()
+    fireEvent.change(screen.getByLabelText("Company name"), {
+      target: { value: "New Corp" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not update company name. Please try again.",
+    )
+    expect(screen.getByLabelText("Company name")).toHaveAttribute("aria-invalid", "true")
   })
 
   it("shows re-verification warning for email changes", () => {

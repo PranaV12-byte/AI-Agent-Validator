@@ -25,15 +25,19 @@ function AccountPage() {
   const [nameError, setNameError] = useState<string | null>(null)
   const [emailError, setEmailError] = useState<string | null>(null)
 
-  const nameChanged = companyName.trim() !== (user?.company_name ?? "")
+  const trimmedCompanyName = companyName.trim()
+  const nameChanged = trimmedCompanyName !== (user?.company_name ?? "")
+  const companyNameIsEmpty = trimmedCompanyName.length === 0
+  const showCompanyNameRequiredError = nameChanged && companyNameIsEmpty
+  const canSaveName = nameChanged && !companyNameIsEmpty && !isSavingName
   const emailChanged = email.trim() !== (user?.email ?? "")
 
   async function handleSaveName() {
-    if (!nameChanged || !companyName.trim()) return
+    if (!canSaveName) return
     setNameError(null)
     setIsSavingName(true)
     try {
-      await updateProfileRequest({ company_name: companyName.trim() })
+      await updateProfileRequest({ company_name: trimmedCompanyName })
       await refreshProfile()
       toast.success("Company name updated")
     } catch {
@@ -87,15 +91,26 @@ function AccountPage() {
           <input
             id="account-company-name"
             value={companyName}
-            onChange={(e) => setCompanyName(e.target.value)}
+            aria-invalid={showCompanyNameRequiredError || nameError ? true : undefined}
+            aria-describedby={showCompanyNameRequiredError ? "company-name-required" : nameError ? "company-name-error" : undefined}
+            onChange={(e) => {
+              setCompanyName(e.target.value)
+              setNameError(null)
+            }}
             className="w-full bg-card-bg border border-border-color rounded-lg px-3 py-2.5 text-sm"
           />
         </div>
-        {nameError ? <p className="text-sm text-brand-red">{nameError}</p> : null}
+        {showCompanyNameRequiredError ? (
+          <p id="company-name-required" role="alert" className="text-sm text-brand-red">
+            Company name is required.
+          </p>
+        ) : nameError ? (
+          <p id="company-name-error" role="alert" className="text-sm text-brand-red">{nameError}</p>
+        ) : null}
         <button
           type="button"
           onClick={() => void handleSaveName()}
-          disabled={isSavingName || !nameChanged}
+          disabled={!canSaveName}
           className="rounded-lg bg-brand-green/10 border border-brand-green/30 text-brand-green px-4 py-2 font-medium hover:bg-brand-green/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {isSavingName ? "Saving..." : "Save"}

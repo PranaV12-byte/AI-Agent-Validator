@@ -1,11 +1,22 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import AuditDetailDrawer from "./AuditDetailDrawer"
 import type { AuditLog } from "../../../types/api"
 
 afterEach(cleanup)
+
+function AuditDrawerHarness() {
+  const [isOpen, setIsOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setIsOpen(true)}>View audit details</button>
+      <AuditDetailDrawer log={isOpen ? baseLog : null} onClose={() => setIsOpen(false)} />
+    </>
+  )
+}
 
 const baseLog: AuditLog = {
   id: "log-abc-123",
@@ -37,7 +48,24 @@ describe("AuditDetailDrawer", () => {
 
   it("renders the drawer when a log is provided", () => {
     render(<AuditDetailDrawer log={baseLog} onClose={vi.fn()} />)
+    const dialog = screen.getByRole("dialog", { name: "Audit Detail" })
+    expect(dialog).toHaveClass("fixed", "inset-0", "h-full", "w-full", "backdrop:bg-black/40")
     expect(screen.getByTestId("audit-drawer-log-abc-123")).toBeInTheDocument()
+  })
+
+  it("closes on native Escape and restores focus to the timestamp trigger", async () => {
+    const user = userEvent.setup()
+    render(<AuditDrawerHarness />)
+
+    const opener = screen.getByRole("button", { name: "View audit details" })
+    await user.click(opener)
+    const dialog = screen.getByRole("dialog", { name: "Audit Detail" })
+    expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus()
+
+    fireEvent(dialog, new Event("cancel", { cancelable: true }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(dialog).not.toHaveAttribute("open")
+    expect(opener).toHaveFocus()
   })
 
   it("displays the audit log id in the header", () => {

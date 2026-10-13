@@ -4,9 +4,9 @@ import { Navigate } from "react-router-dom"
 import { useAuth } from "../../hooks/useAuth"
 
 function PublicRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isHydrated, isLoading } = useAuth()
+  const { accessToken, isAuthenticated, isHydrated, isLoading } = useAuth()
 
-  if (!isHydrated || isLoading) {
+  if (!isHydrated || (isLoading && accessToken)) {
     return (
       <div className="h-full bg-dashboard-bg text-white flex items-center justify-center">
         <p className="text-text-muted">Restoring session...</p>

@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { AuthProvider } from "../../context/AuthContext"
+import PublicRoute from "../../components/auth/PublicRoute"
 import { server } from "../../mocks/server"
 import { MOCK_JWT } from "../../test/utils/renderWithProviders"
 import DashboardPage from "../Dashboard/DashboardPage"
@@ -26,7 +27,7 @@ describe("Login integration", () => {
       <AuthProvider>
         <MemoryRouter initialEntries={["/login"]}>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
+            <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
             <Route path="/dashboard" element={<DashboardPage />} />
           </Routes>
         </MemoryRouter>
@@ -56,12 +57,21 @@ describe("Login integration", () => {
     )
   })
 
-  it("shows credentials error when login API returns 401", async () => {
+  it("keeps the login form and email after a rejected attempt, then allows a successful retry", async () => {
     const user = userEvent.setup()
+    let attempts = 0
 
     server.use(
       http.post("*/api/v1/auth/login", () => {
-        return HttpResponse.json({ detail: "Invalid email or password" }, { status: 401 })
+        attempts += 1
+        if (attempts === 1) {
+          return HttpResponse.json({ detail: "Invalid email or password" }, { status: 401 })
+        }
+        return HttpResponse.json({
+          access_token: MOCK_JWT,
+          token_type: "bearer",
+          refresh_token: "mock-refresh",
+        })
       }),
     )
 
@@ -69,8 +79,8 @@ describe("Login integration", () => {
       <AuthProvider>
         <MemoryRouter initialEntries={["/login"]}>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+            <Route path="/dashboard" element={<div>Dashboard</div>} />
           </Routes>
         </MemoryRouter>
       </AuthProvider>,
@@ -81,7 +91,12 @@ describe("Login integration", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }))
 
     expect(await screen.findByText("Invalid email or password")).toBeInTheDocument()
+    expect(screen.getByLabelText("Email")).toHaveValue("mock@example.com")
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+    expect(await screen.findByText("Dashboard")).toBeInTheDocument()
+    expect(attempts).toBe(2)
   })
 
   it("disables submit button while request is in progress", async () => {
@@ -104,7 +119,7 @@ describe("Login integration", () => {
       <AuthProvider>
         <MemoryRouter initialEntries={["/login"]}>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
+            <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
             <Route path="/dashboard" element={<div>Dashboard</div>} />
           </Routes>
         </MemoryRouter>
