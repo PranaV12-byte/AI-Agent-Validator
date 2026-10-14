@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
 import type { AuditLog } from "../../types/api"
 import { exportAuditLogs, fetchAuditLogs } from "../../services/auditService"
 import AuditDetailDrawer from "./components/AuditDetailDrawer"
-import AuditFilterBar, { type ActionFilter } from "./components/AuditFilterBar"
+import AuditFilterBar, { type ActionFilter, type ReviewFilter } from "./components/AuditFilterBar"
 import AuditTable from "./components/AuditTable"
 import PaginationControls from "./components/PaginationControls"
 
 const PAGE_SIZE = 10
 
 function AuditLogPage() {
+  const navigate = useNavigate()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -18,6 +20,8 @@ function AuditLogPage() {
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
   const [search, setSearch] = useState("")
+  const [reviewStatus, setReviewStatus] = useState<ReviewFilter>("ALL")
+  const [reviewRefresh, setReviewRefresh] = useState(0)
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -36,8 +40,14 @@ function AuditLogPage() {
           start_date: startDate || undefined,
           end_date: endDate || undefined,
           search: search || undefined,
+          review_status: reviewStatus === "ALL" ? undefined : reviewStatus,
         })
         if (!cancelled) {
+          const lastPage = Math.max(1, Math.ceil(response.total / PAGE_SIZE))
+          if (page > lastPage) {
+            setPage(lastPage)
+            return
+          }
           setLogs(response.logs)
           setTotal(response.total)
         }
@@ -58,7 +68,7 @@ function AuditLogPage() {
     return () => {
       cancelled = true
     }
-  }, [action, page, startDate, endDate, search])
+  }, [action, page, startDate, endDate, search, reviewStatus, reviewRefresh])
 
   return (
     <div className="space-y-6">
@@ -69,7 +79,7 @@ function AuditLogPage() {
         </div>
         <button
           type="button"
-          onClick={() => void exportAuditLogs({ action: action === "ALL" ? undefined : action, start_date: startDate || undefined, end_date: endDate || undefined, search: search || undefined })}
+          onClick={() => void exportAuditLogs({ action: action === "ALL" ? undefined : action, start_date: startDate || undefined, end_date: endDate || undefined, search: search || undefined, review_status: reviewStatus === "ALL" ? undefined : reviewStatus })}
           className="flex items-center gap-2 px-4 py-2 text-sm bg-card-bg border border-border-color rounded-lg hover:border-brand-green transition-colors"
         >
           Export CSV
@@ -81,6 +91,7 @@ function AuditLogPage() {
         startDate={startDate}
         endDate={endDate}
         search={search}
+        reviewStatus={reviewStatus}
         onActionChange={(value) => {
           setAction(value)
           setPage(1)
@@ -88,6 +99,7 @@ function AuditLogPage() {
         onStartDateChange={(value) => { setStartDate(value); setPage(1) }}
         onEndDateChange={(value) => { setEndDate(value); setPage(1) }}
         onSearchChange={(value) => { setSearch(value); setPage(1) }}
+        onReviewStatusChange={(value) => { setReviewStatus(value); setPage(1) }}
       />
 
       <AuditTable
@@ -100,6 +112,7 @@ function AuditLogPage() {
           setStartDate("")
           setEndDate("")
           setSearch("")
+          setReviewStatus("ALL")
           setPage(1)
         }}
       />
@@ -112,7 +125,15 @@ function AuditLogPage() {
         onNext={() => setPage((current) => current + 1)}
       />
 
-      <AuditDetailDrawer log={selectedLog} onClose={() => setSelectedLog(null)} />
+      <AuditDetailDrawer
+        log={selectedLog}
+        onClose={() => setSelectedLog(null)}
+        onFeedbackSaved={() => setReviewRefresh((current) => current + 1)}
+        onCreateTest={(draft) => {
+          setSelectedLog(null)
+          navigate("/test-lab", { state: { draft } })
+        }}
+      />
     </div>
   )
 }

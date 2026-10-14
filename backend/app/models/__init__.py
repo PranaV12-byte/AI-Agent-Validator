@@ -11,6 +11,7 @@ from app.models.policy_embedding import PolicyEmbedding
 from app.models.audit_log import AuditLog
 from app.models.safety_config import SafetyConfig
 from app.models.api_usage import ApiUsage
+from app.models.test_lab import DecisionFeedback, TestCase
 
 __all__ = [
     "Tenant",
@@ -19,4 +20,6 @@ __all__ = [
     "AuditLog",
     "SafetyConfig",
     "ApiUsage",
+    "TestCase",
+    "DecisionFeedback",
 ]

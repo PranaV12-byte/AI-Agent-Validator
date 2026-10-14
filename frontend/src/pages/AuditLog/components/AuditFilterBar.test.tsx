@@ -11,10 +11,12 @@ const defaultProps = {
   startDate: "",
   endDate: "",
   search: "",
+  reviewStatus: "ALL" as const,
   onActionChange: vi.fn(),
   onStartDateChange: vi.fn(),
   onEndDateChange: vi.fn(),
   onSearchChange: vi.fn(),
+  onReviewStatusChange: vi.fn(),
 }
 
 describe("AuditFilterBar", () => {
@@ -81,6 +83,18 @@ describe("AuditFilterBar", () => {
   it("reflects current action prop value", () => {
     render(<AuditFilterBar {...defaultProps} action="BLOCKED" />)
     expect(screen.getByTestId("action-filter")).toHaveValue("BLOCKED")
+  })
+
+  it("offers the review filter and reports the selected state", async () => {
+    const onReviewStatusChange = vi.fn()
+    const user = userEvent.setup()
+    const view = render(<AuditFilterBar {...defaultProps} onReviewStatusChange={onReviewStatusChange} />)
+
+    await user.selectOptions(screen.getByTestId("review-filter"), "unreviewed")
+    expect(onReviewStatusChange).toHaveBeenCalledWith("unreviewed")
+
+    view.rerender(<AuditFilterBar {...defaultProps} reviewStatus="resolved" />)
+    expect(screen.getByTestId("review-filter")).toHaveValue("resolved")
   })
 
   it("reflects current startDate and endDate prop values", () => {

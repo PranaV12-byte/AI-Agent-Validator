@@ -2,6 +2,7 @@ import {
   FileText,
   LayoutGrid,
   LogOut,
+  FlaskConical,
   Plug,
   Settings,
   ShieldCheck,
@@ -21,6 +22,7 @@ type NavItem = {
 const navItems: NavItem[] = [
   { to: "/dashboard", label: "Home", icon: LayoutGrid },
   { to: "/audit-log", label: "Activity History", icon: FileText },
+  { to: "/test-lab", label: "Test Lab", icon: FlaskConical },
   { to: "/policies", label: "Protection Rules", icon: ShieldCheck },
   { to: "/integration", label: "Connect Your AI", icon: Plug },
   { to: "/account", label: "Account", icon: User },

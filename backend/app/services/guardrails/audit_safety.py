@@ -34,6 +34,11 @@ _SECRET_PATTERNS = (
 )
 
 
+def contains_recognized_secret(value: str) -> bool:
+    """Return whether bounded user-authored text contains a credential pattern."""
+    return any(pattern.search(value) is not None for pattern in _SECRET_PATTERNS)
+
+
 @dataclass(frozen=True)
 class SafeAuditEvidence:
     input_preview: str | None

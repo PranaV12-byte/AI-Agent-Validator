@@ -79,7 +79,7 @@ describe("responsive navigation", () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
     const dialog = screen.getByRole("dialog", { name: "Navigation" })
-    expect(within(dialog).getAllByRole("link")).toHaveLength(6)
+    expect(within(dialog).getAllByRole("link")).toHaveLength(7)
     await user.click(within(dialog).getByRole("link", { name: "Protection Rules" }))
     expect(await screen.findByRole("heading", { name: "Policy content" })).toBeVisible()
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()

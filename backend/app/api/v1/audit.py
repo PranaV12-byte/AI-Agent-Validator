@@ -9,13 +9,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_tenant
 from app.models.audit_log import AuditLog
+from app.models.test_lab import DecisionFeedback
 from app.models.tenant import Tenant
 from app.schemas.audit import AuditListResponse, AuditLogResponse
 from app.services.guardrails.audit_safety import (
@@ -278,6 +279,56 @@ def _csv_safe_cell(value: Any) -> str:
     return text
 
 
+def _audit_log_filters(
+    *,
+    tenant_id,
+    action: str | None,
+    start_date: date | None,
+    end_date: date | None,
+    search: str | None,
+    review_status: str | None,
+) -> list[Any]:
+    filters: list[Any] = [AuditLog.tenant_id == tenant_id]
+    if action:
+        filters.append(AuditLog.action == action)
+    if start_date:
+        filters.append(
+            AuditLog.created_at >= datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+        )
+    if end_date:
+        filters.append(
+            AuditLog.created_at <= datetime.combine(end_date, time.max, tzinfo=timezone.utc)
+        )
+    if search:
+        filters.append(AuditLog.input_preview.ilike(f"%{search}%"))
+
+    review_exists = select(DecisionFeedback.id).where(
+        DecisionFeedback.audit_log_id == AuditLog.id,
+        DecisionFeedback.tenant_id == tenant_id,
+    )
+    if review_status == "unreviewed":
+        filters.append(~exists(review_exists))
+    elif review_status in {"open", "resolved"}:
+        filters.append(
+            exists(
+                review_exists.where(DecisionFeedback.status == review_status)
+            )
+        )
+    return filters
+
+
+def _review_status_expression(tenant_id):
+    return (
+        select(DecisionFeedback.status)
+        .where(
+            DecisionFeedback.audit_log_id == AuditLog.id,
+            DecisionFeedback.tenant_id == tenant_id,
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
 @router.get("/", response_model=AuditListResponse)
 async def list_audit_logs(
     limit: int = Query(50, ge=1, le=200),
@@ -286,39 +337,35 @@ async def list_audit_logs(
     start_date: date | None = Query(None, description="Filter logs on or after this date (YYYY-MM-DD)"),
     end_date: date | None = Query(None, description="Filter logs on or before this date (YYYY-MM-DD)"),
     search: str | None = Query(None, max_length=500, description="Filter by input_preview content (case-insensitive)"),
+    review_status: str | None = Query(None, pattern="^(open|resolved|unreviewed)$"),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> AuditListResponse:
     """Return recent tenant audit logs ordered by newest first."""
-    base_filter = [AuditLog.tenant_id == tenant.id]
-
-    if action:
-        base_filter.append(AuditLog.action == action)
-
-    if start_date:
-        base_filter.append(
-            AuditLog.created_at >= datetime.combine(start_date, time.min, tzinfo=timezone.utc)
-        )
-
-    if end_date:
-        base_filter.append(
-            AuditLog.created_at <= datetime.combine(end_date, time.max, tzinfo=timezone.utc)
-        )
-
-    if search:
-        base_filter.append(AuditLog.input_preview.ilike(f"%{search}%"))
+    base_filter = _audit_log_filters(
+        tenant_id=tenant.id,
+        action=action,
+        start_date=start_date,
+        end_date=end_date,
+        search=search,
+        review_status=review_status,
+    )
 
     count_result = await db.execute(select(func.count()).select_from(AuditLog).where(*base_filter))
     total = count_result.scalar_one()
 
+    review_status_value = _review_status_expression(tenant.id)
     rows = await db.execute(
-        select(AuditLog)
+        select(AuditLog, review_status_value.label("review_status"))
         .where(*base_filter)
         .order_by(desc(AuditLog.created_at))
         .offset(offset)
         .limit(limit)
     )
-    logs = [_audit_log_view(log) for log in rows.scalars().all()]
+    logs = [
+        _audit_log_view(log).model_copy(update={"review_status": current_review_status})
+        for log, current_review_status in rows.all()
+    ]
 
     page = offset // limit + 1
 
@@ -328,7 +375,7 @@ async def list_audit_logs(
 EXPORT_CAP = 10_000
 
 CSV_FIELDS = [
-    "id", "created_at", "action", "violation_type", "severity",
+    "id", "created_at", "action", "review_status", "violation_type", "severity",
     "hook_type", "input_preview", "processing_ms", "policy_version",
     "payload_hash", "payload_hash_provenance", "algorand_tx_id",
     "anchoring_status", "redacted_fields",
@@ -342,35 +389,34 @@ async def export_audit_logs(
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     search: str | None = Query(None, max_length=500),
+    review_status: str | None = Query(None, pattern="^(open|resolved|unreviewed)$"),
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """Stream a CSV export of audit logs (capped at 10 000 rows)."""
-    base_filter = [AuditLog.tenant_id == tenant.id]
-
-    if action:
-        base_filter.append(AuditLog.action == action)
-    if start_date:
-        base_filter.append(
-            AuditLog.created_at >= datetime.combine(start_date, time.min, tzinfo=timezone.utc)
-        )
-    if end_date:
-        base_filter.append(
-            AuditLog.created_at <= datetime.combine(end_date, time.max, tzinfo=timezone.utc)
-        )
-    if search:
-        base_filter.append(AuditLog.input_preview.ilike(f"%{search}%"))
+    base_filter = _audit_log_filters(
+        tenant_id=tenant.id,
+        action=action,
+        start_date=start_date,
+        end_date=end_date,
+        search=search,
+        review_status=review_status,
+    )
 
     count_result = await db.execute(select(func.count()).select_from(AuditLog).where(*base_filter))
     total = count_result.scalar_one()
 
+    review_status_value = _review_status_expression(tenant.id)
     rows = await db.execute(
-        select(AuditLog)
+        select(AuditLog, review_status_value.label("review_status"))
         .where(*base_filter)
         .order_by(desc(AuditLog.created_at))
         .limit(EXPORT_CAP)
     )
-    logs = [_audit_log_view(log) for log in rows.scalars().all()]
+    logs = [
+        _audit_log_view(log).model_copy(update={"review_status": current_review_status})
+        for log, current_review_status in rows.all()
+    ]
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -381,6 +427,7 @@ async def export_audit_logs(
             str(log.id),
             log.created_at.isoformat() if log.created_at else "",
             log.action or "",
+            log.review_status or "unreviewed",
             log.violation_type or "",
             log.severity or "",
             log.hook_type or "",

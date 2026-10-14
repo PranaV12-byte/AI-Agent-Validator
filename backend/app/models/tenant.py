@@ -81,3 +81,13 @@ class Tenant(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    test_cases = relationship(
+        "TestCase",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
+    decision_feedback = relationship(
+        "DecisionFeedback",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )

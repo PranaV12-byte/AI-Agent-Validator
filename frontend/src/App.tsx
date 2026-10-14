@@ -26,6 +26,7 @@ const PoliciesPage = lazy(() => import("./pages/Policies/PoliciesPage"))
 const SettingsPage = lazy(() => import("./pages/Settings/SettingsPage"))
 const IntegrationPage = lazy(() => import("./pages/Integration/IntegrationPage"))
 const AccountPage = lazy(() => import("./pages/Account/AccountPage"))
+const TestLabPage = lazy(() => import("./pages/TestLab/TestLabPage"))
 
 function LandingOrDashboard() {
   const { isAuthenticated, isHydrated, isLoading } = useAuth()
@@ -114,6 +115,7 @@ function App() {
           >
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/audit-log" element={<AuditLogPage />} />
+            <Route path="/test-lab" element={<TestLabPage />} />
             <Route path="/policies" element={<PoliciesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/integration" element={<IntegrationPage />} />

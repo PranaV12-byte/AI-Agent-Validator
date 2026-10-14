@@ -82,6 +82,71 @@ export type AuditLog = {
   ip_address: string | null
   user_agent: string | null
   created_at: string
+  review_status?: "open" | "resolved" | null
+}
+
+export type ExpectedTestAction = "allow" | "redact" | "block"
+export type TestRunStatus = "passed" | "mismatch" | "unavailable" | "not_run" | "stale" | "revision_conflict"
+
+export type DecisionFeedback = {
+  id: string
+  audit_log_id: string
+  decision: "correct" | "incorrect" | "unsure"
+  expected_action: ExpectedTestAction | null
+  status: "open" | "resolved"
+  note: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type DecisionFeedbackPayload = {
+  decision: DecisionFeedback["decision"]
+  expected_action?: ExpectedTestAction | null
+  status: DecisionFeedback["status"]
+  note?: string | null
+}
+
+export type TestResult = {
+  case_revision: number
+  status: TestRunStatus
+  expected_action: ExpectedTestAction
+  observed_action: ExpectedTestAction | null
+  failure_codes: string[]
+  preview: string | null
+  redaction_counts: Record<string, number>
+  snapshot_hash: string | null
+  completed_at: string
+}
+
+export type TestCase = {
+  id: string
+  name: string
+  prompt: string
+  expected_action: ExpectedTestAction
+  synthetic_data_acknowledged: boolean
+  revision: number
+  source_feedback_id: string | null
+  last_result: TestResult | null
+  last_run_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type TestCasePayload = {
+  name: string
+  prompt: string
+  expected_action: ExpectedTestAction
+  synthetic_data_acknowledged: true
+  revision?: number
+}
+
+export type TestRunResponse = {
+  results: Array<TestResult & { case_id: string }>
+  passed: number
+  mismatched: number
+  unavailable: number
+  not_run: number
+  revision_conflicts: number
 }
 
 export type AuditListResponse = {

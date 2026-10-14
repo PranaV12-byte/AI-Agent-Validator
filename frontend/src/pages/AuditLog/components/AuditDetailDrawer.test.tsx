@@ -1,12 +1,23 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import AuditDetailDrawer from "./AuditDetailDrawer"
-import type { AuditLog } from "../../../types/api"
+import type { AuditLog, DecisionFeedback } from "../../../types/api"
+import { fetchDecisionFeedback, saveDecisionFeedback } from "../../../services/testLabService"
+
+vi.mock("../../../services/testLabService", () => ({
+  fetchDecisionFeedback: vi.fn().mockResolvedValue(null),
+  saveDecisionFeedback: vi.fn(),
+}))
 
 afterEach(cleanup)
+
+beforeEach(() => {
+  vi.mocked(fetchDecisionFeedback).mockReset().mockResolvedValue(null)
+  vi.mocked(saveDecisionFeedback).mockReset()
+})
 
 function AuditDrawerHarness() {
   const [isOpen, setIsOpen] = useState(false)
@@ -51,6 +62,126 @@ describe("AuditDetailDrawer", () => {
     const dialog = screen.getByRole("dialog", { name: "Audit Detail" })
     expect(dialog).toHaveClass("fixed", "inset-0", "h-full", "w-full", "backdrop:bg-black/40")
     expect(screen.getByTestId("audit-drawer-log-abc-123")).toBeInTheDocument()
+  })
+
+  it("saves scoped decision feedback and starts a follow-up without audit content", async () => {
+    const user = userEvent.setup()
+    const onCreateTest = vi.fn()
+    vi.mocked(saveDecisionFeedback).mockResolvedValue({
+      id: "feedback-1",
+      audit_log_id: baseLog.id,
+      decision: "incorrect",
+      expected_action: "allow",
+      status: "resolved",
+      note: "",
+      created_at: "2026-10-14T00:00:00Z",
+      updated_at: "2026-10-14T00:00:00Z",
+    })
+    render(<AuditDetailDrawer log={baseLog} onClose={vi.fn()} onCreateTest={onCreateTest} />)
+
+    await user.selectOptions(await screen.findByLabelText("Was the decision correct?"), "incorrect")
+    await user.selectOptions(screen.getByLabelText("Expected outcome"), "allow")
+    await user.selectOptions(screen.getByLabelText("Review status"), "resolved")
+    await user.click(screen.getByRole("button", { name: "Save decision" }))
+
+    await screen.findByRole("button", { name: "Create synthetic follow-up" })
+    expect(saveDecisionFeedback).toHaveBeenCalledWith(baseLog.id, {
+      decision: "incorrect",
+      expected_action: "allow",
+      status: "resolved",
+      note: "",
+    })
+    await user.click(screen.getByRole("button", { name: "Create synthetic follow-up" }))
+    expect(onCreateTest).toHaveBeenCalledWith({
+      sourceFeedbackId: "feedback-1",
+      expectedAction: "allow",
+      name: "Follow-up for blocked event",
+    })
+    expect(onCreateTest.mock.calls[0][0]).not.toHaveProperty("prompt")
+    expect(onCreateTest.mock.calls[0][0]).not.toHaveProperty("auditPreview")
+  })
+
+  it("does not allow saving or conversion when the existing review failed to load", async () => {
+    vi.mocked(fetchDecisionFeedback).mockRejectedValueOnce(new Error("offline"))
+    const onCreateTest = vi.fn()
+    render(<AuditDetailDrawer log={baseLog} onClose={vi.fn()} onCreateTest={onCreateTest} />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the decision review.")
+    expect(screen.getByRole("button", { name: "Save decision" })).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "Create synthetic follow-up" })).not.toBeInTheDocument()
+    expect(saveDecisionFeedback).not.toHaveBeenCalled()
+    expect(onCreateTest).not.toHaveBeenCalled()
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save decision" })).toBeEnabled())
+  })
+
+  it("disables review fields while a save is pending", async () => {
+    const user = userEvent.setup()
+    let resolveSave: ((value: DecisionFeedback) => void) | undefined
+    vi.mocked(saveDecisionFeedback).mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve }))
+    render(<AuditDetailDrawer log={baseLog} onClose={vi.fn()} />)
+
+    await user.selectOptions(await screen.findByLabelText("Was the decision correct?"), "incorrect")
+    await user.selectOptions(screen.getByLabelText("Expected outcome"), "allow")
+    await user.click(screen.getByRole("button", { name: "Save decision" }))
+
+    expect(screen.getByLabelText("Was the decision correct?")).toBeDisabled()
+    expect(screen.getByLabelText("Expected outcome")).toBeDisabled()
+    expect(screen.getByLabelText("Review status")).toBeDisabled()
+    expect(screen.getByLabelText("Note (optional, up to 500 characters)")).toBeDisabled()
+
+    resolveSave?.({
+      id: "feedback-pending",
+      audit_log_id: baseLog.id,
+      decision: "incorrect",
+      expected_action: "allow",
+      status: "open",
+      note: "",
+      created_at: "2026-10-14T00:00:00Z",
+      updated_at: "2026-10-14T00:00:00Z",
+    })
+    await screen.findByRole("button", { name: "Save review" })
+  })
+
+  it("offers conversion for any saved review without mapping ERROR to block", async () => {
+    const user = userEvent.setup()
+    const onCreateTest = vi.fn()
+    const savedReview: DecisionFeedback = {
+      id: "feedback-error",
+      audit_log_id: "log-error",
+      decision: "unsure",
+      expected_action: null,
+      status: "open",
+      note: null,
+      created_at: "2026-10-14T00:00:00Z",
+      updated_at: "2026-10-14T00:00:00Z",
+    }
+    vi.mocked(fetchDecisionFeedback).mockResolvedValueOnce(savedReview)
+    const errorLog = { ...baseLog, id: "log-error", action: "ERROR" as const }
+    render(<AuditDetailDrawer log={errorLog} onClose={vi.fn()} onCreateTest={onCreateTest} />)
+
+    await user.click(await screen.findByRole("button", { name: "Create synthetic follow-up" }))
+    expect(onCreateTest).toHaveBeenCalledWith({
+      sourceFeedbackId: "feedback-error",
+      expectedAction: undefined,
+      name: "Follow-up for error event",
+    })
+  })
+
+  it("ignores a late feedback response after switching to a different audit", async () => {
+    let resolveFirst: ((value: null) => void) | undefined
+    vi.mocked(fetchDecisionFeedback)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+      .mockResolvedValueOnce(null)
+    const otherLog = { ...baseLog, id: "log-next" }
+    const view = render(<AuditDetailDrawer log={baseLog} onClose={vi.fn()} />)
+
+    view.rerender(<AuditDetailDrawer log={otherLog} onClose={vi.fn()} />)
+    resolveFirst?.(null)
+    await screen.findByLabelText("Was the decision correct?")
+    expect(screen.getByTestId("audit-drawer-log-next")).toBeInTheDocument()
+    expect(screen.queryByText("Could not load the decision review.")).not.toBeInTheDocument()
   })
 
   it("closes on native Escape and restores focus to the timestamp trigger", async () => {

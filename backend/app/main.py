@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi.errors import RateLimitExceeded
 
-from app.api.v1 import audit, auth, dashboard, demo, health, hooks, policies
+from app.api.v1 import audit, auth, dashboard, demo, health, hooks, policies, test_lab
 from app.config import settings
 from app.core.rate_limit import limiter, rate_limit_exceeded_handler
 from app.core.redis_client import get_redis
@@ -227,6 +227,8 @@ app.include_router(hooks.validate_router, prefix="/api/v1")
 app.include_router(demo.router, prefix="/api/v1")
 app.include_router(policies.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")
+app.include_router(test_lab.router, prefix="/api/v1")
+app.include_router(test_lab.feedback_router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)

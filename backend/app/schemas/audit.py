@@ -31,6 +31,7 @@ class AuditLogResponse(BaseModel):
     created_at: datetime
     redacted_fields: list[str] = Field(default_factory=list)
     anchoring_status: Literal["anchored", "pending", "disabled", "not_anchored"] = "pending"
+    review_status: Literal["open", "resolved"] | None = None
 
 
 class AuditListResponse(BaseModel):

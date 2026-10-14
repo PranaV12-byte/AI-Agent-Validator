@@ -1,11 +1,19 @@
+import { useEffect, useRef, useState } from "react"
 import { X } from "lucide-react"
 
 import { useNativeModalDialog } from "../../../hooks/useNativeModalDialog"
-import type { AuditLog } from "../../../types/api"
+import { getErrorMessage } from "../../../services/apiClient"
+import { fetchDecisionFeedback, saveDecisionFeedback } from "../../../services/testLabService"
+import type { AuditLog, DecisionFeedback, ExpectedTestAction } from "../../../types/api"
+
+type ReviewDecision = "correct" | "incorrect" | "unsure"
+type ReviewStatus = "open" | "resolved"
 
 type AuditDetailDrawerProps = {
   log: AuditLog | null
   onClose: () => void
+  onCreateTest?: (draft: { sourceFeedbackId: string; expectedAction?: ExpectedTestAction; name: string }) => void
+  onFeedbackSaved?: () => void
 }
 
 function inferReason(log: AuditLog): string {
@@ -65,11 +73,105 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
+function observedExpectedAction(log: AuditLog): ExpectedTestAction | undefined {
+  if (log.action === "ALLOWED") return "allow"
+  if (log.action === "REDACTED") return "redact"
+  if (log.action === "BLOCKED") return "block"
+  return undefined
+}
+
+function AuditDetailDrawer({ log, onClose, onCreateTest, onFeedbackSaved }: AuditDetailDrawerProps) {
+  const [feedback, setFeedback] = useState<DecisionFeedback | null>(null)
+  const [decision, setDecision] = useState<ReviewDecision>("unsure")
+  const [expectedAction, setExpectedAction] = useState<ExpectedTestAction | "">("")
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatus>("open")
+  const [note, setNote] = useState("")
+  const [isLoadingFeedback, setIsLoadingFeedback] = useState(false)
+  const [isSavingFeedback, setIsSavingFeedback] = useState(false)
+  const [feedbackLoadError, setFeedbackLoadError] = useState<string | null>(null)
+  const [feedbackSaveError, setFeedbackSaveError] = useState<string | null>(null)
+  const [feedbackRetry, setFeedbackRetry] = useState(0)
+  const feedbackOwner = useRef(0)
+  const savingFeedback = useRef(false)
   const { dialogRef, handleCancel, handleKeyDown, handleBackdropClick } = useNativeModalDialog({
     isOpen: Boolean(log),
     onClose,
   })
+  const logId = log?.id
+
+  useEffect(() => {
+    const owner = ++feedbackOwner.current
+    if (!logId) {
+      setFeedback(null)
+      setIsLoadingFeedback(false)
+      setFeedbackLoadError(null)
+      return
+    }
+    const controller = new AbortController()
+    setFeedback(null)
+    setDecision("unsure")
+    setExpectedAction("")
+    setReviewStatus("open")
+    setNote("")
+    setFeedbackLoadError(null)
+    setFeedbackSaveError(null)
+    savingFeedback.current = false
+    setIsSavingFeedback(false)
+    setIsLoadingFeedback(true)
+    void fetchDecisionFeedback(logId, controller.signal)
+      .then((current) => {
+        if (owner !== feedbackOwner.current || controller.signal.aborted) return
+        setFeedback(current)
+        if (current) {
+          setDecision(current.decision)
+          setExpectedAction(current.expected_action ?? "")
+          setReviewStatus(current.status)
+          setNote(current.note ?? "")
+        }
+      })
+      .catch((error: unknown) => {
+        if (owner === feedbackOwner.current && !controller.signal.aborted) {
+          setFeedbackLoadError(getErrorMessage(error, "Could not load the decision review."))
+        }
+      })
+      .finally(() => {
+        if (owner === feedbackOwner.current && !controller.signal.aborted) setIsLoadingFeedback(false)
+      })
+    return () => {
+      controller.abort()
+      feedbackOwner.current += 1
+    }
+  }, [logId, feedbackRetry])
+
+  async function saveReview() {
+    if (!log || savingFeedback.current) return
+    savingFeedback.current = true
+    setIsSavingFeedback(true)
+    setFeedbackSaveError(null)
+    const owner = feedbackOwner.current
+    try {
+      const saved = await saveDecisionFeedback(log.id, {
+        decision,
+        expected_action: decision === "incorrect" ? expectedAction || undefined : undefined,
+        status: reviewStatus,
+        note,
+      })
+      if (owner !== feedbackOwner.current) return
+      setFeedback(saved)
+      setDecision(saved.decision)
+      setExpectedAction(saved.expected_action ?? "")
+      setReviewStatus(saved.status)
+      setNote(saved.note ?? "")
+      onFeedbackSaved?.()
+    } catch (error) {
+      if (owner === feedbackOwner.current) setFeedbackSaveError(getErrorMessage(error, "Could not save the decision review."))
+    } finally {
+      if (owner === feedbackOwner.current) {
+        savingFeedback.current = false
+        setIsSavingFeedback(false)
+      }
+    }
+  }
 
   if (!log) return null
 
@@ -150,6 +252,50 @@ function AuditDetailDrawer({ log, onClose }: AuditDetailDrawerProps) {
             </span>
           </Field>
         ) : null}
+
+        <section className="rounded-xl border border-border-color bg-card-bg p-4" aria-labelledby="decision-review-title">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h4 id="decision-review-title" className="font-semibold">Decision review</h4>
+              <p className="mt-1 text-xs text-text-muted">A human note for this audit record. It does not change the original event or protection rules.</p>
+            </div>
+            {feedback ? <span className="rounded-full border border-border-color px-2.5 py-1 text-[11px] text-text-muted">{feedback.status}</span> : null}
+          </div>
+          {feedbackLoadError ? <div role="alert" className="mt-3 rounded-lg border border-brand-red/30 bg-brand-red/10 p-2.5 text-xs text-red-200">{feedbackLoadError} <button type="button" className="ml-2 underline" disabled={isLoadingFeedback} onClick={() => setFeedbackRetry((current) => current + 1)}>Try again</button></div> : null}
+          {feedbackSaveError ? <p role="alert" className="mt-3 rounded-lg border border-brand-red/30 bg-brand-red/10 p-2.5 text-xs text-red-200">{feedbackSaveError}</p> : null}
+          {isLoadingFeedback ? <p role="status" className="mt-3 text-xs text-text-muted">Loading saved review…</p> : (
+            <div className="mt-4 space-y-3">
+              <div>
+                <label htmlFor="decision-choice" className="mb-1.5 block text-xs text-text-muted">Was the decision correct?</label>
+                <select id="decision-choice" value={decision} disabled={isLoadingFeedback || isSavingFeedback || Boolean(feedbackLoadError)} onChange={(event) => setDecision(event.target.value as ReviewDecision)} className="w-full rounded-lg border border-border-color bg-dashboard-bg px-3 py-2 text-sm disabled:opacity-50">
+                  <option value="correct">Correct</option><option value="incorrect">Incorrect</option><option value="unsure">Unsure</option>
+                </select>
+              </div>
+              {decision === "incorrect" ? (
+                <div>
+                  <label htmlFor="expected-review-action" className="mb-1.5 block text-xs text-text-muted">Expected outcome</label>
+                  <select id="expected-review-action" required value={expectedAction} disabled={isLoadingFeedback || isSavingFeedback || Boolean(feedbackLoadError)} onChange={(event) => setExpectedAction(event.target.value as ExpectedTestAction | "")} className="w-full rounded-lg border border-border-color bg-dashboard-bg px-3 py-2 text-sm disabled:opacity-50">
+                    <option value="">Choose outcome</option><option value="allow">Allow</option><option value="redact">Redact</option><option value="block">Block</option>
+                  </select>
+                </div>
+              ) : null}
+              <div>
+                <label htmlFor="review-status" className="mb-1.5 block text-xs text-text-muted">Review status</label>
+                <select id="review-status" value={reviewStatus} disabled={isLoadingFeedback || isSavingFeedback || Boolean(feedbackLoadError)} onChange={(event) => setReviewStatus(event.target.value as ReviewStatus)} className="w-full rounded-lg border border-border-color bg-dashboard-bg px-3 py-2 text-sm disabled:opacity-50"><option value="open">Open</option><option value="resolved">Resolved</option></select>
+              </div>
+              <div>
+                <label htmlFor="review-note" className="mb-1.5 block text-xs text-text-muted">Note (optional, up to 500 characters)</label>
+                <textarea id="review-note" maxLength={500} rows={3} value={note} disabled={isLoadingFeedback || isSavingFeedback || Boolean(feedbackLoadError)} onChange={(event) => setNote(event.target.value)} className="w-full resize-y rounded-lg border border-border-color bg-dashboard-bg px-3 py-2 text-sm disabled:opacity-50" />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => void saveReview()} disabled={isLoadingFeedback || isSavingFeedback || Boolean(feedbackLoadError) || (decision === "incorrect" && !expectedAction)} className="rounded-lg bg-brand-green px-3.5 py-2 text-xs font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50">{isSavingFeedback ? "Saving…" : feedback ? "Save review" : "Save decision"}</button>
+                {feedback && onCreateTest ? (
+                  <button type="button" disabled={isLoadingFeedback || Boolean(feedbackLoadError) || isSavingFeedback} onClick={() => onCreateTest({ sourceFeedbackId: feedback.id, expectedAction: feedback.expected_action ?? observedExpectedAction(log), name: `Follow-up for ${log.action.toLowerCase()} event` })} className="rounded-lg border border-border-color px-3.5 py-2 text-xs hover:border-brand-green disabled:cursor-not-allowed disabled:opacity-50">Create synthetic follow-up</button>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </section>
 
         <div>
           <p className="text-text-muted mb-1">Sanitized Input Preview</p>
